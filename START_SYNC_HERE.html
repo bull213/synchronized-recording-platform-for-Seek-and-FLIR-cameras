@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seek / FLIR / Ultramic — source setup</title>
+<style>body{font:17px/1.6 system-ui,sans-serif;background:#101923;color:#e6edf3;max-width:950px;margin:40px auto;padding:0 24px}a{color:#79b8ff}code,pre{background:#192839;padding:3px 8px}pre{padding:16px}img{max-width:100%;height:auto}h1{line-height:1.2}</style></head>
+<body><h1>Seek / FLIR / Ultramic Recorder</h1>
+<p>This is the source distribution. Install Python 3.12 x64, then run these commands from this folder:</p>
+<pre>Setup_Windows.cmd --camera
+Demo_Sync_Recorder.cmd</pre>
+<p>The demo simulates Seek, two FLIRs, and microphone audio. It needs no camera SDKs.
+Click Record and Stop manually. Demo sessions are labelled DEMO.</p>
+<img src="docs/images/unified_cameras.png" alt="Combined recorder with synthetic cameras and generic settings">
+<h2>Connect real devices</h2>
+<p>Install your licensed Seek SDK and Windows driver, plus the matching Teledyne Spinnaker SDK / vendor
+PySpin wheel for Python 3.12 x64. Set <code>SYNC_SEEK_DLL</code> to your installed Seek DLL and run
+<code>Start_Sync_Recorder.cmd</code>. The unrelated PyPI pyspin package is not the FLIR SDK.</p>
+<p><strong>Cameras only</strong> is the default. To include audio, select <strong>Cameras + microphone</strong>,
+select an input, and click <strong>Connect &amp; monitor</strong>. Independent FLIR MP4 and microphone MP3
+modes are also available.</p>
+<h2>Outputs and timing</h2>
+<p>Choose storage outside the source checkout. Combined takes save segmented MP4 previews, thermal CSV,
+timing logs, and a take report. Microphone mode adds original PCM WAV. Camera faults trigger recovery
+attempts and gap reporting. Review the final report before analysis.</p>
+<p>Host receipt timestamps and audio estimates do not establish physical simultaneity. Validate physical
+timing on the actual devices.</p>
+<h2>Optional local executable bundles</h2>
+<p>A separately built executable bundle includes Python and native libraries. Keep the complete bundle
+together and run <code>Setup_New_PC.cmd</code> inside it. Source users follow the installation above.
+The repository does not include camera drivers, SDK binaries, or executables.</p>
+<p>Read <a href="docs/SETUP.md">setup</a>, <a href="docs/SYNCHRONIZATION.md">synchronization</a>,
+<a href="docs/DEVELOPMENT.md">local builds</a>, and <a href="docs/VALIDATION.md">validation</a>.</p>
+<p><a href="START_HERE.html">Standalone microphone setup</a> · <a href="README.md">README</a></p></body></html>
