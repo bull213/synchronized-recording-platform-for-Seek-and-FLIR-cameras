@@ -1,0 +1,4 @@
+-r requirements.txt
+opencv-python==5.0.0.93
+# Install the vendor's PySpin wheel matching your Python/Spinnaker SDK separately.
+# The unrelated package named "pyspin" on PyPI is not the camera SDK.
