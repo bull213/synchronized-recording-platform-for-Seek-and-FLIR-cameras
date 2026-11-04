@@ -4,6 +4,11 @@ A Windows desktop recorder for Dodotronic Ultramic 200K microphones, with an opt
 combined Seek thermal / FLIR camera recorder. Includes editable Python source,
 synthetic demos, recorder tests, and an optional Arduino TTL bridge.
 
+The recorder now has a cleaner dark layout, expandable settings, visible
+readiness explanations, and an optional live spectrogram below the cameras.
+Record, Stop, elapsed time, and trigger status remain visible across views.
+See the [recorder interface guide](docs/RECORDER_GUI.md).
+
 This is the **source distribution**. Install Python and the dependencies below.
 Camera SDKs, drivers, recorded sessions, model weights, and bundled executables
 are obtained or generated separately.
@@ -56,6 +61,10 @@ The combined app starts in **Cameras only** mode. For combined audio, select
 Record. Choose an output folder outside the source checkout.
 
 Resize the sidebar or use **Hide settings** and **Preview mode** for small screens.
+Expand **Seek settings** or **Audio settings** for advanced controls. Use
+**Show live audio** to monitor audio alongside the camera previews; the full
+FFT and frequency controls remain in **Live audio**. Warnings persist above the
+workspace, and completed takes have an **Open recording folder** action.
 Double-click a camera to enlarge it. Live and review spectrograms have independent
 frequency ranges, FFT size, zoom, and display controls.
 

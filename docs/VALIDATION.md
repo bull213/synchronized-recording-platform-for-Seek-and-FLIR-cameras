@@ -1,5 +1,21 @@
 # Source validation
 
+## Recorder GUI update — 4 November 2026
+
+The prepared public source passed **170 tests, with 2 expected skips**, on Windows
+x64 / Python 3.12.10 using the existing development environment. The synthetic
+recording self-test and the **99-file** source-inventory check passed.
+
+New tests cover mode-specific readiness messages, expandable settings, preserved
+values, a shared spectrogram moved between views during recording, saved-take
+results, and persistent warning/export-failure messages. Existing laptop-layout,
+recording-mode, standalone audio, and cage ROI tests also passed. Documentation
+screenshots were regenerated with synthetic devices and generic settings.
+
+This update preserves the public calibration and microphone-identifier defaults,
+recording formats, trigger commands, and inventory-based source packaging.
+No new physical-device or executable-build validation was performed.
+
 ## Public source preparation — 27 October 2026
 
 Validated on Windows x64 with Python 3.12.10 in a freshly created virtual

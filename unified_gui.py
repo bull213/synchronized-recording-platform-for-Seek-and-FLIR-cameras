@@ -11,7 +11,8 @@ import cv2
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets as W
 
-from gui_theme import QT_STYLE
+from gui_theme import RECORDER_STYLE
+from recorder_ui import RecorderPresentation
 from recording_coordinator import RecordingCoordinator
 from seek_calibration import SEEK_CALIBRATIONS, get_seek_calibration
 from ultramic_studio.audio import DemoSource, create_input_source
@@ -21,7 +22,7 @@ from ultramic_studio.synchronized import SynchronizedAudioEngine, calibrate_sour
 from ultramic_studio.triggers import SerialTrigger, SoftwareTrigger
 
 
-class UnifiedWindow(MainWindow):
+class UnifiedWindow(RecorderPresentation, MainWindow):
     def __init__(self, core):
         self.core = core
         self.controller = RecordingCoordinator(core)
@@ -30,6 +31,7 @@ class UnifiedWindow(MainWindow):
         self._mic_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='Mic connection')
         self._next_clock_check = 0
         self._preview_labels = {}
+        self._device_labels = {}
         self._preview_rows = []
         self._camera_panels = {}
         self._enlarge_buttons = {}
@@ -39,7 +41,7 @@ class UnifiedWindow(MainWindow):
         self._last_mp3 = None
         super().__init__()
         self.setWindowTitle('Seek / FLIR / Ultramic Recorder')
-        self.setStyleSheet(QT_STYLE)
+        self.setStyleSheet(RECORDER_STYLE)
         self.setMinimumSize(560, 320)
         self._fit_screen()
         QtCore.QTimer.singleShot(0, self._restore_sidebar_width)
@@ -63,15 +65,13 @@ class UnifiedWindow(MainWindow):
         self.record_mode.addItems(['Cameras only', 'Cameras + microphone',
                                    'FLIR only (.mp4)', 'Microphone only (.mp3)', 'Seek only'])
         self.record_mode.currentIndexChanged.connect(self._mode_changed)
-        source_group = self.mode.parentWidget()
+        source_group = self.source_group
         source_group.setTitle('01   OPTIONAL MICROPHONE')
-        for note in self.auto_mp3.parentWidget().findChildren(W.QLabel):
-            if note.text().startswith('Original WAV'):
-                self.audio_output_note = note
         self.pre.setToolTip('Saved separately as pretrigger.wav. The main WAV begins at the Seek start.')
         self.stop.setToolTip('Stop the shared take; armed external triggers remain active.')
 
         cameras = W.QWidget()
+        self.monitor_page = cameras
         layout = W.QVBoxLayout(cameras)
         row = W.QHBoxLayout()
         self.camera_status = label('Connecting cameras…')
@@ -115,9 +115,12 @@ class UnifiedWindow(MainWindow):
         self._calibration_changed()
         grid.addWidget(label('Calibration used'), 2, 0)
         grid.addWidget(self.calibration, 2, 1, 1, 3)
+        self.preview_actions = []
         for column, (text, action) in enumerate((('Cycle palette', 'palette'),
                                                ('Cycle pipeline', 'pipeline'), ('Toggle sharpening', 'sharpen'))):
-            grid.addWidget(button(text, lambda checked=False, a=action: self._camera_action(a)), 3, column)
+            control = button(text, lambda checked=False, a=action: self._camera_action(a))
+            self.preview_actions.append(control)
+            grid.addWidget(control, 3, column)
         self.camera_options = W.QScrollArea()
         self.camera_options.setWidgetResizable(True)
         self.camera_options.setWidget(options)
@@ -126,7 +129,6 @@ class UnifiedWindow(MainWindow):
         self.preview_widget = W.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.preview_widget.setChildrenCollapsible(False)
         self.preview_widget.setHandleWidth(8)
-        self.preview_widget.setStyleSheet('QSplitter::handle { background: #34465a; }')
         self.preview_widget.setToolTip('Drag the dividers to resize camera previews.')
         self.preview_scroll = W.QScrollArea()
         self.preview_scroll.setWidgetResizable(True)
@@ -145,7 +147,7 @@ class UnifiedWindow(MainWindow):
         self.tabs.setCurrentIndex(0)
         trigger_page = W.QWidget()
         trigger_layout = W.QVBoxLayout(trigger_page)
-        group = self.arm.parentWidget()
+        group = self.trigger_group
         group.parentWidget().layout().removeWidget(group)
         trigger_layout.addWidget(group)
         note = label('Armed commands control the selected recording mode.', True)
@@ -154,11 +156,16 @@ class UnifiedWindow(MainWindow):
         trigger_layout.addStretch()
         self.tabs.addTab(trigger_page, 'Triggers')
         self._build_layout_controls(root)
+        self._build_recorder_presentation()
         self.update_controls()
 
     def _add_camera_panel(self, key, title, index):
         group = W.QGroupBox(title)
         layout = W.QVBoxLayout(group)
+        device_status = label('Waiting for frames…', True)
+        device_status.setWordWrap(True)
+        layout.addWidget(device_status)
+        self._device_labels[key] = device_status
         preview = W.QLabel('Waiting for frames…')
         preview.setObjectName('preview')
         preview.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -284,6 +291,7 @@ class UnifiedWindow(MainWindow):
         self.sync_summary.setVisible(not focus)
         self.tabs.tabBar().setVisible(not focus)
         self.preview_button.setText('Exit preview' if focus else 'Preview mode')
+        self._refresh_presentation()
         self._reflow_timer.start(0)
 
     def _toggle_settings(self):
@@ -326,6 +334,11 @@ class UnifiedWindow(MainWindow):
         self._save_sidebar_width()
         self._layout_signature = None
         self.tabs.setCurrentIndex(0)
+        if hasattr(self, 'audio_toggle'):
+            self.audio_toggle.setChecked(False)
+            for section, expanded in ((self.session_section, True), (self.device_section, True),
+                                      (self.seek_section, False), (self.audio_section, False)):
+                section.toggle.setChecked(expanded)
         self._apply_panel_visibility()
 
     def eventFilter(self, watched, event):
@@ -344,6 +357,8 @@ class UnifiedWindow(MainWindow):
         # Three panels fit a compact laptop once settings are hidden. Avoid
         # wasting scarce vertical space on a second row in that view.
         columns = 3 if width >= 780 else 2 if width >= 520 else 1
+        if self.height() < 620 and width >= 500:
+            columns = 3
         keys = [self._focused_camera] if self._focused_camera else list(self._camera_panels)
         signature = (columns, tuple(keys))
         if signature == self._layout_signature:
@@ -367,7 +382,7 @@ class UnifiedWindow(MainWindow):
             row.addWidget(self._camera_panels[key])
             self._camera_panels[key].show()
             self._enlarge_buttons[key].setText('All cameras' if self._focused_camera else 'Enlarge')
-        self.preview_widget.setMinimumHeight(120 * len(self._preview_rows))
+        self.preview_widget.setMinimumHeight(200 * len(self._preview_rows))
         for row in self._preview_rows:
             row.setSizes([1000] * row.count())
         self.preview_widget.setSizes([1000] * len(self._preview_rows))
@@ -426,6 +441,7 @@ class UnifiedWindow(MainWindow):
             if hasattr(self, 'audio_output_note'):
                 self.audio_output_note.setText('Normal-speed MP3 only. Conversion finishes after Stop.' if mp3_only else
                                               'Original WAV + optional 10× slower MP3.\nWAV files split every 30 minutes (~720 MB).')
+        self._refresh_presentation()
 
     def toggle_connection(self):
         if self._mic_future is not None:
@@ -624,6 +640,7 @@ class UnifiedWindow(MainWindow):
                 self.log(self.camera_status.text())
             elif kind == 'connect_error':
                 self.camera_status.setText('Camera connection failed')
+                self._show_notice(event[1], 'error')
                 self.log(event[1])
             elif kind == 'recording_pending':
                 self._audio_saved = None
@@ -637,6 +654,13 @@ class UnifiedWindow(MainWindow):
             elif kind == 'recording_saved':
                 self.drain_notices()
                 take = event[3]
+                self._last_result_take = take['take_id']
+                result = {'complete': 'Saved', 'complete_with_gaps': 'Saved with gaps', 'error': 'Failed'}.get(event[2], event[2])
+                self._last_result = f"Take {take['take_id']} · {result}"
+                self._export_status = ''
+                if event[2] != 'complete':
+                    self._show_notice(self._last_result + '. Check diagnostics and the take report.',
+                                      'error' if event[2] == 'error' else 'warning')
                 self.log(f"Take {take['take_id']}: {event[2]}. Folder: {event[1]}")
                 if take.get('recording_mode', 'combined') != 'combined':
                     self.sync_summary.setText(f"Take {take['take_id']}: {event[2]}. Folder: {event[1]}")
@@ -661,6 +685,7 @@ class UnifiedWindow(MainWindow):
                         self.queue_export(self.last_session)
             elif kind in ('camera_error', 'writer_error', 'seek_disconnected'):
                 message = event[1] if len(event) > 1 else 'Seek disconnected.'
+                self._show_notice(message, 'error')
                 mode = self.controller.options['recording_mode']
                 seek_error = kind == 'seek_disconnected' or str(message).startswith('Seek')
                 if kind == 'writer_error' or mode == 'combined' or (mode == 'flir_mp4' and not seek_error) or (mode == 'seek_only' and seek_error):
@@ -673,12 +698,16 @@ class UnifiedWindow(MainWindow):
                     self.camera_status.setText('Seek disconnected · restart after reconnecting')
             elif kind in ('message', 'writer_warning'):
                 self.log(event[1])
+                if kind == 'writer_warning':
+                    self._show_notice(event[1])
             elif kind == 'seek_event':
                 self.log(f'Seek {event[2]}: {event[3]}')
             elif kind == 'shutdown_complete':
                 self._cameras_closed = True
 
     def _render_camera_previews(self):
+        if not self.preview_scroll.isVisible():
+            return
         with self.core.latest_ir_lock:
             snap = self.core.latest_ir
         frames = {'seek': cv2.cvtColor(snap[1], cv2.COLOR_BGRA2BGR)} if snap else {}
@@ -686,7 +715,7 @@ class UnifiedWindow(MainWindow):
             frames.update({f'flir_{idx}': frame.copy() for idx, frame in self.core.flir_previews.items()})
         for key, frame in frames.items():
             preview = self._preview_labels.get(key)
-            if preview is None:
+            if preview is None or not preview.isVisible():
                 continue
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             height, width = rgb.shape[:2]

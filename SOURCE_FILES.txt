@@ -22,6 +22,7 @@ docs/licenses/LGPL-2.1.txt
 docs/licenses/LGPL-3.0.txt
 docs/live-preview.png
 docs/PUBLISHING.md
+docs/RECORDER_GUI.md
 docs/review-preview.png
 docs/SETUP.md
 docs/SYNCHRONIZATION.md
@@ -40,6 +41,7 @@ LICENSE
 pytest.ini
 README.md
 recorder_setup.py
+recorder_ui.py
 recording_coordinator.py
 requirements.txt
 requirements-camera.txt
@@ -48,6 +50,7 @@ requirements-export.txt
 scripts/build_portable.py
 scripts/build_sync_portable.py
 scripts/capture_demo_screenshots.py
+scripts/capture_recorder_redesign.py
 scripts/package_source.py
 scripts/sync_runtime_hook.py
 seek_calibration.py
@@ -70,6 +73,7 @@ tests/test_failures_and_gui.py
 tests/test_independent_recording.py
 tests/test_laptop_layout.py
 tests/test_portable_setup.py
+tests/test_recorder_presentation.py
 tests/test_seek_calibration.py
 tests/test_shared_triggers_and_failures.py
 tests/test_shutter_capture.py

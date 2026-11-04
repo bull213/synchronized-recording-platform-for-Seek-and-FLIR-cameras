@@ -247,6 +247,7 @@ class MainWindow(W.QMainWindow):
         body.addWidget(scroll)
 
         source_group = W.QGroupBox("01   INPUT")
+        self.source_group = source_group
         grid = W.QVBoxLayout(source_group)
         self.mode = W.QComboBox()
         self.mode.addItems(["Microphone · 200 kHz", "Demo · synthetic calls"])
@@ -271,6 +272,7 @@ class MainWindow(W.QMainWindow):
         side_layout.addWidget(source_group)
 
         files = W.QGroupBox("02   RECORDING")
+        self.recording_group = files
         grid = W.QVBoxLayout(files)
         self.session_label = W.QLineEdit(self.settings.value("label", "mouse_01"))
         self.session_label.setPlaceholderText("Animal / session label")
@@ -293,6 +295,7 @@ class MainWindow(W.QMainWindow):
         grid.addWidget(self.auto_mp3)
         note = label("Original WAV + optional 10× slower MP3.\nWAV files split every 30 minutes (~720 MB).", True)
         note.setWordWrap(True)
+        self.audio_output_note = note
         grid.addWidget(note)
         record_row = W.QHBoxLayout()
         self.record = button("●  Record", lambda: self.command("START"), "record")
@@ -304,6 +307,7 @@ class MainWindow(W.QMainWindow):
         side_layout.addWidget(files)
 
         triggers = W.QGroupBox("03   EXTERNAL TRIGGERS")
+        self.trigger_group = triggers
         grid = W.QVBoxLayout(triggers)
         self.arm = W.QCheckBox("Arm start / stop triggers")
         self.arm.toggled.connect(self.toggle_arm)
@@ -347,6 +351,7 @@ class MainWindow(W.QMainWindow):
         self.tabs = W.QTabWidget()
         right.addWidget(self.tabs, 1)
         live = W.QWidget()
+        self.live_page = live
         live_layout = W.QVBoxLayout(live)
         options = W.QHBoxLayout()
         options.addWidget(label("FFT"))
