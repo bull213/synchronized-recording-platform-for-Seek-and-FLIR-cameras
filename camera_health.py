@@ -43,6 +43,8 @@ class CameraHealth:
         mode = self.options['recording_mode']
         if mode == 'microphone_mp3':
             return []
+        if mode == 'seek_only':
+            return ['seek']
         names = [f"flir_cam{cam['index']}" for cam in self.flir_cams]
         return (['seek'] if mode == 'combined' else []) + names
 

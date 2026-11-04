@@ -85,7 +85,7 @@ class RecordingCoordinator(CameraHealth):
             if self.state != 'idle':
                 raise RuntimeError('Finish the current take before changing recording settings.')
             updated = {**self.options, **options}
-            if updated['recording_mode'] not in ('combined', 'flir_mp4', 'microphone_mp3'):
+            if updated['recording_mode'] not in ('combined', 'flir_mp4', 'microphone_mp3', 'seek_only'):
                 raise ValueError('Unknown recording mode.')
             if updated['recording_mode'] != 'combined':
                 updated['microphone'] = updated['recording_mode'] == 'microphone_mp3'
@@ -187,8 +187,8 @@ class RecordingCoordinator(CameraHealth):
         if self._writer_unhealthy or self._recovery_busy() or not self.prepare_done.is_set():
             return False
         mode = self.options['recording_mode']
-        cameras = (mode == 'microphone_mp3' or
-                   (bool(self.flir_cams) if mode == 'flir_mp4' else self.cameras_ready))
+        cameras = {'microphone_mp3': True, 'seek_only': self.seek_ready,
+                   'flir_mp4': bool(self.flir_cams), 'combined': self.cameras_ready}[mode]
         return cameras and (not self.options['microphone'] or self._audio_ready())
 
     def _check_ready(self):
@@ -201,7 +201,7 @@ class RecordingCoordinator(CameraHealth):
         self._check_ready()
         if self._writer_unhealthy or self._recovery_busy():
             raise RuntimeError('Wait for camera cleanup before starting another take.')
-        if (self.options['recording_mode'] == 'combined' and
+        if (self.options['recording_mode'] in ('combined', 'seek_only') and
                 self.options['sample_mode'] == 'after_shutter' and self.shutter_settings['automatic']):
             raise RuntimeError('After shutter request sampling requires Custom shutter mode. Apply shutter first.')
         self.shutter_gate.cancel()
@@ -308,15 +308,16 @@ class RecordingCoordinator(CameraHealth):
                 self._run_mode = mode
             if mode != 'microphone_mp3' and self.writer is None:
                 ready = threading.Event()
+                camera_indices = [] if mode == 'seek_only' else [cam['index'] for cam in self.flir_cams]
                 self.writer = threading.Thread(target=self.core.writer_thread,
-                                                args=(str(self.run_dir), [cam['index'] for cam in self.flir_cams], ready),
+                                                args=(str(self.run_dir), camera_indices, ready),
                                                 daemon=True, name='Camera disk writer')
                 self.writer.start()
                 if not ready.wait(5) or not self.writer.is_alive():
                     raise RuntimeError('The camera output files could not be initialized.')
             elif mode != 'microphone_mp3' and not self.writer.is_alive():
                 raise RuntimeError('The camera writer has stopped. Restart the app before recording again.')
-            journal = RecordingJournal(self.run_dir, self.take_number) if mode == 'combined' else None
+            journal = RecordingJournal(self.run_dir, self.take_number) if mode in ('combined', 'seek_only') else None
             with self.lock:
                 if self._prepare_abandoned.is_set():
                     raise RuntimeError('Recording preparation finished after its deadline.')
@@ -385,7 +386,7 @@ class RecordingCoordinator(CameraHealth):
                 if not self._stream_seen('seek', received_ns, generation):
                     return
                 self.recent_seek.append(snap)
-            if self.options['recording_mode'] != 'combined':
+            if self.options['recording_mode'] not in ('combined', 'seek_only'):
                 return
             if not self.is_recording or received_ns < self.take['request_monotonic_ns']:
                 return
@@ -432,7 +433,7 @@ class RecordingCoordinator(CameraHealth):
             name = f'flir_cam{cam_index}'
             if not self._stream_seen(name, received_ns, generation):
                 return
-            if self.options['recording_mode'] == 'microphone_mp3':
+            if self.options['recording_mode'] in ('microphone_mp3', 'seek_only'):
                 return
             if (self.is_recording and self.options['recording_mode'] == 'flir_mp4'
                     and received_ns >= self.take['request_monotonic_ns']
@@ -560,6 +561,8 @@ class RecordingCoordinator(CameraHealth):
                 expected = ['seek'] + [f"flir_cam{cam['index']}" for cam in self.flir_cams]
                 if self.take['recording_mode'] == 'flir_mp4':
                     expected.remove('seek')
+                elif self.take['recording_mode'] == 'seek_only':
+                    expected = ['seek']
                 elif self.take['recording_mode'] == 'microphone_mp3':
                     expected = []
                 if self.take['shared_start_monotonic_ns'] is not None:
@@ -585,7 +588,7 @@ class RecordingCoordinator(CameraHealth):
                 with self.lock:
                     self.take['errors'].append(str(exc))
                     self.take['status'] = 'error'
-                if self.run_dir and self.take['recording_mode'] == 'combined':
+                if self.run_dir and self.take['recording_mode'] in ('combined', 'seek_only'):
                     try:
                         atomic_json(self.run_dir / f'take{self.take_number:02d}_sync.json', self.take)
                     except Exception:
@@ -640,7 +643,7 @@ class RecordingCoordinator(CameraHealth):
             self.take['errors'].extend(meta.get('errors') or ['Audio contains no completed samples.'])
 
     def _save_report(self):
-        if not self.journal or not self.take or self.take['recording_mode'] != 'combined':
+        if not self.journal or not self.take or self.take['recording_mode'] not in ('combined', 'seek_only'):
             return
         self.take['diagnostic_events_dropped'] = self.journal.dropped_events
         self.take['stream_health'] = deepcopy(self.health)
@@ -737,7 +740,7 @@ class RecordingCoordinator(CameraHealth):
             self._last_shutter_tick_ns = time.perf_counter_ns()
             if self.options['sample_mode'] != 'after_shutter':
                 return False
-            if not self.is_recording or self.options['recording_mode'] != 'combined':
+            if not self.is_recording or self.options['recording_mode'] not in ('combined', 'seek_only'):
                 return True
             if self._health('seek')['state'] in ('recovering', 'disconnected'):
                 return True
