@@ -12,6 +12,7 @@ Check_Microphone.cmd
 Create_Desktop_Shortcut.cmd
 Create_Desktop_Shortcut.ps1
 Demo_Sync_Recorder.cmd
+docs/CAGE_ROI.md
 docs/DEVELOPMENT.md
 docs/images/unified_cameras.png
 docs/images/unified_spectrogram.png
@@ -54,6 +55,7 @@ Setup_New_PC.cmd
 Setup_Windows.cmd
 SOURCE_FILES.txt
 Start_Anaconda.cmd
+Start_Cage_ROI.cmd
 START_HERE.html
 START_SYNC_HERE.html
 Start_Sync_Recorder.cmd
@@ -73,7 +75,11 @@ tests/test_shared_triggers_and_failures.py
 tests/test_shutter_capture.py
 tests/test_source_package.py
 tests/test_synchronized_recording.py
+tests/test_thermal_roi.py
 tests/test_winmm.py
+thermal_roi.py
+thermal_roi_gui.py
+thermal_roi_storage.py
 ultramic_studio/__init__.py
 ultramic_studio/__main__.py
 ultramic_studio/audio.py

@@ -30,6 +30,45 @@ def shutdown(controller):
     wait_for(lambda: any(e[0] == 'shutdown_complete' for e in controller.core.ui_events.queue))
 
 
+@pytest.mark.parametrize('flir_connected', [False, True])
+@pytest.mark.parametrize('sample_mode', ['all', 'custom', 'after_shutter'])
+def test_seek_only_records_without_flir_output(tmp_path, monkeypatch, flir_connected, sample_mode):
+    core = DemoCameraCore()
+    if not flir_connected:
+        monkeypatch.setattr(core, 'start_blackfly', lambda: (None, None, []))
+    controller = RecordingCoordinator(core)
+    controller.configure(output=str(tmp_path), recording_mode='seek_only',
+                         sample_mode=sample_mode, sample_hz=10)
+    if sample_mode == 'after_shutter':
+        controller.shutter_settings.update(automatic=False, hz=10)
+    assert not controller.ready()
+    controller.connect()
+    try:
+        wait_for(lambda: not controller.connecting)
+        assert controller.ready()
+        assert controller._selected_streams() == ['seek']
+        assert not controller.options['microphone']
+        for _ in range(2):
+            assert controller.request('START')['ok']
+            wait_for(lambda: controller.take['frame_counts'].get('seek', 0) >= 4)
+            assert controller.request('STOP')['ok']
+            assert controller.finished.wait(8)
+            assert controller.take['status'] == 'complete', controller.take
+            assert set(controller.take['written_frame_counts']) == {'seek'}
+        videos = list(controller.run_dir.rglob('*.mp4'))
+        assert videos
+        assert not list(controller.run_dir.rglob('*flir*'))
+        assert list(controller.run_dir.rglob('*thermal*.csv'))
+        for path in videos:
+            video = cv2.VideoCapture(str(path))
+            try:
+                assert video.read()[0]
+            finally:
+                video.release()
+    finally:
+        shutdown(controller)
+
+
 def test_flir_only_without_seek_saves_only_playable_mp4s(tmp_path, monkeypatch):
     core = DemoCameraCore()
     def unavailable():
@@ -165,6 +204,12 @@ def test_gui_modes_and_draggable_preview_panels(tmp_path, monkeypatch):
                                  pos=point + QtCore.QPoint(60, 0))
         app.processEvents()
         assert row.sizes() != before
+        window.record_mode.setCurrentIndex(4)
+        assert window.record_mode.currentText() == 'Seek only'
+        assert window.controller.options['recording_mode'] == 'seek_only'
+        assert window.record.isEnabled()
+        assert window.sample_mode.isEnabled()
+        assert window.calibration.isEnabled()
         window.record_mode.setCurrentIndex(2)
         assert window.controller.options['recording_mode'] == 'flir_mp4'
         assert window.record.isEnabled()

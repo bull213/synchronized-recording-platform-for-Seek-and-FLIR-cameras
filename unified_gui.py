@@ -61,7 +61,7 @@ class UnifiedWindow(MainWindow):
         self.header_widget.hide()
         self.record_mode = W.QComboBox()
         self.record_mode.addItems(['Cameras only', 'Cameras + microphone',
-                                   'FLIR only (.mp4)', 'Microphone only (.mp3)'])
+                                   'FLIR only (.mp4)', 'Microphone only (.mp3)', 'Seek only'])
         self.record_mode.currentIndexChanged.connect(self._mode_changed)
         source_group = self.mode.parentWidget()
         source_group.setTitle('01   OPTIONAL MICROPHONE')
@@ -374,7 +374,7 @@ class UnifiedWindow(MainWindow):
 
     def _recording_options(self):
         index = self.record_mode.currentIndex()
-        return dict(recording_mode={2: 'flir_mp4', 3: 'microphone_mp3'}.get(index, 'combined'),
+        return dict(recording_mode={2: 'flir_mp4', 3: 'microphone_mp3', 4: 'seek_only'}.get(index, 'combined'),
                     microphone=index in (1, 3))
 
     def _mode_changed(self):
@@ -412,7 +412,7 @@ class UnifiedWindow(MainWindow):
         self.ports.setEnabled(self.serial_trigger is None and not self._closing)
         if hasattr(self, 'record_mode'):
             self.record_mode.setEnabled(not locked)
-            combined = self.record_mode.currentIndex() < 2
+            combined = self.record_mode.currentIndex() in (0, 1, 4)
             self.sample_mode.setEnabled(not locked and combined)
             self.sample_hz.setEnabled(not locked and combined and self.sample_mode.currentIndex() == 0)
             self.calibration.setEnabled(not locked and combined)
@@ -663,7 +663,7 @@ class UnifiedWindow(MainWindow):
                 message = event[1] if len(event) > 1 else 'Seek disconnected.'
                 mode = self.controller.options['recording_mode']
                 seek_error = kind == 'seek_disconnected' or str(message).startswith('Seek')
-                if kind == 'writer_error' or mode == 'combined' or (mode == 'flir_mp4' and not seek_error):
+                if kind == 'writer_error' or mode == 'combined' or (mode == 'flir_mp4' and not seek_error) or (mode == 'seek_only' and seek_error):
                     self.controller.fault(str(message))
                 else:
                     self.log(str(message))

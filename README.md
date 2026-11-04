@@ -47,6 +47,7 @@ FLIR SDK.
 | Standalone microphone | Native 200 kHz mono PCM16 WAV, live spectrogram, WAV review, optional 10× time-expanded MP3 |
 | Cameras only | Seek thermal CSV and segmented Seek/FLIR MP4 previews, timing logs and take reports |
 | Cameras + microphone | Camera outputs plus aligned PCM WAV and separate optional pre-trigger audio |
+| Seek only | Thermal CSV and segmented Seek MP4 preview; no FLIR or microphone required |
 | FLIR only | Segmented MP4 files from connected FLIR cameras; no Seek or microphone required |
 | Microphone only | Normal-speed MP3; temporary WAV is retained if conversion fails |
 
@@ -62,6 +63,19 @@ Microphone serial metadata is optional and blank by default. A user-entered seri
 is a label, not a hardware identity verified by the audio driver. The public source
 ships with **None (camera temperature)** calibration; see [setup](docs/SETUP.md)
 for registering a calibration you have independently measured.
+
+## Cage ROI exporter
+
+Run `Setup_Windows.cmd --camera`, then `Start_Cage_ROI.cmd` to open a finished
+recording and draw, move, or resize a separate cage region for each mouse.
+Review the boundaries and export calibrated native pixels plus per-frame
+temperature summaries. The window shows progress, elapsed time, estimated time
+remaining, cancellation, and persistent completion or failure status.
+
+The time slider selects both video and native thermal previews. Enlarged cage
+previews preserve the selected region's aspect ratio. Export uses bounded buffers
+and up to two compression workers, then verifies every saved archive.
+See [the cage ROI guide](docs/CAGE_ROI.md) for output formats and validation.
 
 ## Timing and data
 
