@@ -56,3 +56,33 @@ QPlainTextEdit {{ background:{COLORS['input']}; border:1px solid {COLORS['border
 QScrollArea {{ border:none; }}
 QStatusBar {{ color:{COLORS['muted']}; }}
 """
+
+# Applied only by UnifiedWindow; the ROI and standalone audio styles stay intact.
+RECORDER_STYLE = QT_STYLE + """
+QLabel { background: transparent; }
+QGroupBox { margin-top: 12px; padding-top: 10px; border-color: #303b49; }
+QGroupBox::title { color: #b9c5d4; }
+QPushButton { padding: 7px 10px; min-height: 18px; }
+QPushButton:focus, QToolButton:focus, QLineEdit:focus, QComboBox:focus,
+QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #70b3ff; }
+QCheckBox:focus { outline: 1px solid #70b3ff; }
+QPushButton#record { padding: 9px 18px; }
+QPushButton#stop:enabled { background: #e6eaf0; color: #111923; }
+QPushButton#disclosure { text-align: left; background: #1b2531; border: none; }
+QLabel#sectionSummary { color: #acb9c9; padding: 2px 4px; }
+QLabel#deviceStatus { color: #b9c5d4; padding: 5px; background: #161f2a; border-radius: 4px; }
+QLabel#notice { padding: 7px 10px; background: #1b2531; border-radius: 5px; }
+QLabel#notice[tone="warning"], QLabel#badge[tone="warning"] { color: #ffcf75; background: #30291c; }
+QLabel#notice[tone="error"], QLabel#badge[tone="error"] { color: #ffb2b7; background: #362127; }
+QLabel#badge[tone="success"] { color: #88e3ac; background: #173127; }
+QLabel#badge[tone="recording"] { color: #ffccd0; background: #57272e; }
+QLabel#triggerStatus { color: #a7b8cf; padding: 4px; }
+QLabel#metric { font-size: 21px; }
+QSplitter::handle { background: #243344; }
+QSplitter::handle:hover { background: #4c9aff; }
+QScrollBar:vertical { background: #111923; width: 9px; margin: 0; }
+QScrollBar::handle:vertical { background: #3e4d61; min-height: 28px; border-radius: 4px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+QTabBar::tab:selected { border-bottom: 2px solid #70b3ff; }
+"""
