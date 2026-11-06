@@ -14,200 +14,12 @@ from PySide6 import QtCore as C, QtGui as G, QtWidgets as W
 
 from .exporter import (colorize, export_rois, first_frame, load_config, make_config,
                          atomic_json, validate_cages, ExportCancelled, parse_pixels)
-from ultramic_studio.theme import QT_STYLE, RECORDER_STYLE
+from ultramic_studio.theme import RECORDER_STYLE
 
 
-COLORS = ['#70ef8c', '#ffd23c', '#68c8ff', '#ef91e4']
-
-
-class NativeBrowser:
-    """Index frame offsets lazily; only decode pixels for the selected frame."""
-    def __init__(self, root, shape):
-        self.path = Path(root) / 'seek_thermal.csv'
-        self.shape = tuple(shape)
-        self.offsets = [0]
-        stat = self.path.stat()
-        self.identity = (stat.st_size, stat.st_mtime_ns)
-
-    def read(self, position, entry, cancel):
-        stat = self.path.stat()
-        if (stat.st_size, stat.st_mtime_ns) != self.identity:
-            raise ValueError('Recording changed. Reopen it before browsing thermal frames.')
-        with self.path.open('rb', buffering=8 * 1024 * 1024) as handle:
-            handle.seek(self.offsets[min(position, len(self.offsets)-1)])
-            index = min(position, len(self.offsets)-1)
-            while index <= position:
-                if cancel.is_set():
-                    raise ExportCancelled('Thermal preview cancelled.')
-                header = handle.readline()
-                if not header:
-                    raise ValueError('Thermal frame is missing.')
-                metadata = dict(item.split('=', 1) for item in next(csv.reader([header.decode('utf-8-sig')])) if '=' in item)
-                h, w = int(metadata['height']), int(metadata['width'])
-                if (h, w) != self.shape:
-                    raise ValueError('Thermal image dimensions changed.')
-                lines = [handle.readline() for _ in range(h)]
-                if any(not line or b'width=' in line for line in lines):
-                    raise ValueError('Truncated thermal frame.')
-                if index + 1 == len(self.offsets):
-                    self.offsets.append(handle.tell())
-                if index == position:
-                    if int(metadata['timestamp_utc_ns']) != int(entry[3]):
-                        raise ValueError('Thermal preview timestamp does not match the Seek log.')
-                    return colorize(parse_pixels(lines, w))
-                index += 1
-
-
-class CageCanvas(W.QWidget):
-    changed = C.Signal(int, object)
-    selected = C.Signal(int)
-
-    def __init__(self):
-        super().__init__()
-        self.setMinimumSize(480, 360)
-        self.image = None
-        self.cages = []
-        self.active = -1
-        self.drawing = False
-        self.drag = None
-        self.proposed = None
-
-    def set_image(self, rgb):
-        rgb = np.ascontiguousarray(rgb, dtype=np.uint8)
-        self.image = G.QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], G.QImage.Format.Format_RGB888).copy()
-        self.update()
-
-    def image_rect(self):
-        if self.image is None:
-            return C.QRectF()
-        scale = min(self.width() / self.image.width(), self.height() / self.image.height())
-        w, h = self.image.width() * scale, self.image.height() * scale
-        return C.QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
-
-    def image_point(self, point):
-        rect = self.image_rect()
-        return (int(np.clip((point.x() - rect.x()) * self.image.width() / rect.width(), 0, self.image.width() - 1)),
-                int(np.clip((point.y() - rect.y()) * self.image.height() / rect.height(), 0, self.image.height() - 1)))
-
-    def mapped(self, roi):
-        rect = self.image_rect()
-        scale = rect.width() / self.image.width()
-        x, y, w, h = roi
-        return C.QRectF(rect.x() + x * scale, rect.y() + y * scale, w * scale, h * scale)
-
-    def paintEvent(self, event):
-        painter = G.QPainter(self)
-        painter.fillRect(self.rect(), G.QColor('#152238'))
-        if self.image is None:
-            painter.setPen(G.QColor('white'))
-            painter.drawText(self.rect(), C.Qt.AlignmentFlag.AlignCenter, 'Open a recording to select cages')
-            return
-        painter.drawImage(self.image_rect(), self.image)
-        for i, cage in enumerate(self.cages):
-            roi = self.proposed if i == self.active and self.proposed else cage['roi']
-            rect = self.mapped(roi)
-            painter.setPen(G.QPen(G.QColor(COLORS[i % len(COLORS)]), 3 if i == self.active else 2))
-            painter.drawRect(rect)
-            painter.drawText(rect.topLeft() + C.QPointF(4, 17), cage['mouse_id'])
-            if i == self.active:
-                for point in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight()):
-                    painter.drawRect(C.QRectF(point.x() - 4, point.y() - 4, 8, 8))
-        if self.active < 0 and self.proposed:
-            painter.setPen(G.QPen(G.QColor(COLORS[len(self.cages) % len(COLORS)]), 2))
-            painter.drawRect(self.mapped(self.proposed))
-
-    def mousePressEvent(self, event):
-        if event.button() != C.Qt.MouseButton.LeftButton or self.image is None or not self.image_rect().contains(event.position()):
-            return
-        point = self.image_point(event.position())
-        if self.drawing:
-            self.drag = ('draw', point)
-        else:
-            if self.active >= 0:
-                x, y, w, h = self.cages[self.active]['roi']
-                rect = self.mapped([x, y, w, h])
-                corners = [(rect.topLeft(), (x+w-1, y+h-1)), (rect.topRight(), (x, y+h-1)),
-                           (rect.bottomLeft(), (x+w-1, y)), (rect.bottomRight(), (x, y))]
-                for display, opposite in corners:
-                    if abs(display.x() - event.position().x()) <= 9 and abs(display.y() - event.position().y()) <= 9:
-                        self.drag = ('draw', opposite)
-                        return
-            for i in reversed(range(len(self.cages))):
-                if self.mapped(self.cages[i]['roi']).contains(event.position()):
-                    self.active = i
-                    self.selected.emit(i)
-                    self.drag = ('move', point, self.cages[i]['roi'][:])
-                    self.update()
-                    break
-
-    def mouseMoveEvent(self, event):
-        if not self.drag:
-            return
-        px, py = self.image_point(event.position())
-        ax, ay = self.drag[1]
-        if self.drag[0] == 'draw':
-            self.proposed = [min(ax, px), min(ay, py), abs(px-ax)+1, abs(py-ay)+1]
-        else:
-            x, y, w, h = self.drag[2]
-            self.proposed = [max(0, min(x+px-ax, self.image.width()-w)),
-                             max(0, min(y+py-ay, self.image.height()-h)), w, h]
-        self.update()
-
-    def mouseReleaseEvent(self, event):
-        if not self.drag:
-            return
-        self.mouseMoveEvent(event)
-        proposal = self.proposed
-        self.drag = self.proposed = None
-        self.drawing = False
-        self.changed.emit(self.active, proposal)
-        self.update()
-
-
-class Task(C.QObject):
-    result = C.Signal(object)
-    error = C.Signal(str)
-    finished = C.Signal()
-    progress = C.Signal(int, float, float)
-
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    @C.Slot()
-    def run(self):
-        try:
-            self.result.emit(self.fn(self))
-        except ExportCancelled as exc:
-            self.error.emit(str(exc) or 'Export cancelled. The partial run remains marked cancelled.')
-        except Exception as exc:
-            self.error.emit(str(exc))
-        finally:
-            self.finished.emit()
-
-
-def inspect_recording(root):
-    frame = first_frame(root)
-    previews = []
-    with (Path(root) / 'seek_log.csv').open(newline='', encoding='utf-8-sig') as handle:
-        for row in csv.DictReader(handle):
-            previews.append((row['file'], int(row['part_frame_index']), int(row['idx']), row['sdk_utc_ns']))
-    return root, frame, previews
-
-
-def video_preview(root, entry, shape):
-    path = (Path(root) / entry[0].replace('\\', '/')).resolve()
-    if not path.is_relative_to(Path(root).resolve()):
-        raise ValueError('Video path is outside this recording.')
-    capture = cv2.VideoCapture(str(path))
-    try:
-        capture.set(cv2.CAP_PROP_POS_FRAMES, entry[1])
-        ok, bgr = capture.read()
-        if not ok or tuple(bgr.shape[:2]) != tuple(shape):
-            raise ValueError('Video preview is missing or has different dimensions. Use the native thermal preview.')
-        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    finally:
-        capture.release()
+from .canvas import COLORS, CageCanvas
+from .preview import NativeBrowser, inspect_recording, video_preview
+from .worker import Task
 
 
 class RoiWindow(W.QMainWindow):
@@ -216,8 +28,9 @@ class RoiWindow(W.QMainWindow):
         self.coordinator = coordinator
         self._holds_export_guard = False
         self.setWindowTitle('Cage ROI · Thermal data exporter')
-        self.setStyleSheet(RECORDER_STYLE if coordinator else QT_STYLE)
-        self.resize(1120, 780)
+        self.setStyleSheet(RECORDER_STYLE)
+        area = self.screen().availableGeometry()
+        self.resize(min(1120, area.width() - 24), min(780, area.height() - 48))
         self.root = self.frame = None
         self.previews = []
         self.native_browser = None
@@ -233,9 +46,12 @@ class RoiWindow(W.QMainWindow):
         self.export_timer.timeout.connect(self.update_running_status)
         widget = W.QWidget()
         layout = W.QVBoxLayout(widget)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(5)
         self.setCentralWidget(widget)
         self.controls = W.QWidget()
         top = W.QHBoxLayout(self.controls)
+        top.setContentsMargins(0, 0, 0, 0)
         for text, fn in [('Open recording…', self.open_recording), ('Load cages…', self.load_cages),
                          ('Save cages…', self.save_cages)]:
             button = W.QPushButton(text)
@@ -247,6 +63,7 @@ class RoiWindow(W.QMainWindow):
         layout.addWidget(self.source_label)
         self.body = W.QWidget()
         row = W.QHBoxLayout(self.body)
+        row.setContentsMargins(0, 0, 0, 0)
         self.canvas = CageCanvas()
         self.canvas.changed.connect(self.change_roi)
         self.canvas.selected.connect(lambda i: self.cage_list.setCurrentRow(i))
@@ -258,6 +75,7 @@ class RoiWindow(W.QMainWindow):
         instructions.setWordWrap(True)
         side.addWidget(instructions)
         self.cage_list = W.QListWidget()
+        self.cage_list.setAccessibleName('Cages')
         self.cage_list.currentRowChanged.connect(self.select_cage)
         side.addWidget(self.cage_list)
         for text, fn in [('Add cage', self.add_cage), ('Rename / genotype', self.rename_cage),
@@ -265,6 +83,28 @@ class RoiWindow(W.QMainWindow):
             button = W.QPushButton(text)
             button.clicked.connect(fn)
             side.addWidget(button)
+        self.coordinates = W.QGroupBox('Cage coordinates (pixels)')
+        coordinates_layout = W.QVBoxLayout(self.coordinates)
+        coordinates_layout.setContentsMargins(8, 8, 8, 8)
+        columns = W.QHBoxLayout()
+        left, right = W.QFormLayout(), W.QFormLayout()
+        self.coordinate_fields = []
+        for title, minimum, form in (('X', 0, left), ('Y', 0, right),
+                                      ('Width', 1, left), ('Height', 1, right)):
+            field = W.QSpinBox()
+            field.setRange(minimum, 4096)
+            field.setAccessibleName(f'Cage {title.lower()} in pixels')
+            field.setToolTip('Native thermal image coordinates in pixels.')
+            form.addRow(title, field)
+            self.coordinate_fields.append(field)
+        columns.addLayout(left)
+        columns.addLayout(right)
+        coordinates_layout.addLayout(columns)
+        self.apply_coordinates = W.QPushButton('Apply coordinates')
+        self.apply_coordinates.clicked.connect(self.apply_cage_coordinates)
+        coordinates_layout.addWidget(self.apply_coordinates)
+        self.coordinates.setEnabled(False)
+        side.addWidget(self.coordinates)
         self.crop = W.QLabel('Selected cage preview')
         self.crop.setMinimumSize(180, 160)
         self.crop.setAlignment(C.Qt.AlignmentFlag.AlignCenter)
@@ -277,8 +117,6 @@ class RoiWindow(W.QMainWindow):
         side.addWidget(enlarge)
         self.review = W.QCheckBox('Cage boundaries checked\nfor this recording')
         self.review.setChecked(False)
-        self.review.setStyleSheet('QCheckBox::indicator { width:18px; height:18px; border:2px solid #a5b4c7; border-radius:3px; } '
-                                 'QCheckBox::indicator:checked { background:#3fb950; border-color:#3fb950; }')
         self.review.toggled.connect(self.update_export_readiness)
         side.addWidget(self.review)
         sidebar = W.QScrollArea()
@@ -290,10 +128,12 @@ class RoiWindow(W.QMainWindow):
         layout.addWidget(self.body, 1)
         self.browse_controls = W.QWidget()
         browser = W.QHBoxLayout(self.browse_controls)
+        browser.setContentsMargins(0, 0, 0, 0)
         native = W.QPushButton('Native thermal frame')
         native.clicked.connect(self.native_preview)
         browser.addWidget(native)
         self.slider = W.QSlider(C.Qt.Orientation.Horizontal)
+        self.slider.setAccessibleName('Recording preview position')
         self.slider.sliderReleased.connect(self.browse_video)
         browser.addWidget(self.slider, 1)
         preview_button = W.QPushButton('Preview selected time')
@@ -301,15 +141,19 @@ class RoiWindow(W.QMainWindow):
         browser.addWidget(preview_button)
         layout.addWidget(self.browse_controls)
         self.preview_label = W.QLabel('Review cage positions. Export includes thermal data and, when selected, cropped Seek video.')
+        self.preview_label.setWordWrap(True)
         layout.addWidget(self.preview_label)
         self.export_status = W.QLabel()
+        self.export_status.setAccessibleName('Cage export status')
         self.export_status.setWordWrap(True)
         self.export_status.setMinimumHeight(44)
-        layout.addWidget(self.export_status)
-        actions = W.QHBoxLayout()
+        status_row = W.QHBoxLayout()
+        status_row.addWidget(self.export_status, 1)
         self.include_video = W.QCheckBox('Export cropped Seek video')
         self.include_video.setChecked(coordinator is not None)
-        actions.addWidget(self.include_video)
+        status_row.addWidget(self.include_video)
+        layout.addLayout(status_row)
+        actions = W.QHBoxLayout()
         self.export_button = W.QPushButton('Export pixels + temperatures…')
         self.export_button.clicked.connect(self.export)
         actions.addWidget(self.export_button)
@@ -322,6 +166,7 @@ class RoiWindow(W.QMainWindow):
         actions.addWidget(open_result)
         layout.addLayout(actions)
         self.progress_bar = W.QProgressBar()
+        self.progress_bar.setAccessibleName('Cage export progress')
         self.progress_bar.setMinimumHeight(22)
         self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
@@ -342,6 +187,7 @@ class RoiWindow(W.QMainWindow):
         self.export_status.setStyleSheet(f'QLabel {{ background:#1f2630; color:{color}; '
                                         f'border:1px solid {color}; border-radius:5px; padding:8px; font-weight:600; }}')
         self.export_status.setText(text)
+        self.export_status.setAccessibleName('Cage export status: ' + text)
 
     def update_export_readiness(self):
         if not hasattr(self, 'export_status') or self._export_active:
@@ -393,6 +239,8 @@ class RoiWindow(W.QMainWindow):
         self.export_button.setEnabled(False)
         self.cancel_button.setEnabled(exporting)
         if exporting:
+            self.include_video.setEnabled(False)
+        if exporting:
             self._export_active = True
             self._export_started = time.monotonic()
             self._export_frames = 0
@@ -424,6 +272,7 @@ class RoiWindow(W.QMainWindow):
         self.browse_controls.setEnabled(True)
         self.export_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
+        self.include_video.setEnabled(True)
         self.cancel_button.setText('Cancel export')
         self.export_button.setText('Export pixels + temperatures…')
         if self._holds_export_guard:
@@ -443,6 +292,9 @@ class RoiWindow(W.QMainWindow):
 
     def recording_loaded(self, result):
         self.root, self.frame, self.previews = result
+        height, width = self.frame.pixels.shape
+        for field, maximum in zip(self.coordinate_fields, (width - 1, height - 1, width, height)):
+            field.setMaximum(maximum)
         self.native_browser = NativeBrowser(self.root, self.frame.pixels.shape)
         self.cages = []
         self.slider.setRange(0, max(0, len(self.previews) - 1))
@@ -492,8 +344,23 @@ class RoiWindow(W.QMainWindow):
     def select_cage(self, i):
         self.canvas.active = i
         self.canvas.drawing = False
+        self.coordinates.setEnabled(0 <= i < len(self.cages))
+        if 0 <= i < len(self.cages):
+            self.set_coordinate_values(self.cages[i]['roi'])
         self.canvas.update()
         self.update_crop()
+
+    def set_coordinate_values(self, roi):
+        for field, value in zip(self.coordinate_fields, roi):
+            field.setValue(value)
+
+    def apply_cage_coordinates(self):
+        if self.frame is None:
+            return
+        index = self.canvas.active
+        if index < 0 and not self.canvas.drawing:
+            return
+        self.change_roi(index, [field.value() for field in self.coordinate_fields])
 
     def update_crop(self):
         i = self.canvas.active
@@ -527,7 +394,9 @@ class RoiWindow(W.QMainWindow):
         self.cage_list.setCurrentRow(-1)
         self.canvas.active = -1
         self.canvas.drawing = True
-        self.message('Drag over the new cage, then release.')
+        self.coordinates.setEnabled(True)
+        self.set_coordinate_values([0, 0, 1, 1])
+        self.message('Drag over the new cage, or enter coordinates and choose Apply coordinates.')
 
     def redraw(self):
         if self.canvas.active >= 0:

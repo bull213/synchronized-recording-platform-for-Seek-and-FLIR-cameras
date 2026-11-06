@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from recorder_ui import readiness
+from ultramic_studio.recorder.ui.presentation import readiness
 from test_laptop_layout import window, pump
 
 
@@ -32,6 +32,7 @@ def state(**changes):
     ({'state': 'starting'}, 'custom', False, ''),
     ({'_writer_unhealthy': True}, 'custom', False, 'log'),
     ({'_recovery_busy': lambda: True}, 'custom', False, 'log'),
+    ({'roi_export_active': True}, 'custom', False, ''),
 ])
 def test_readiness_explains_selected_mode(changes, sample, expected, target):
     controller = state(**changes)
@@ -104,6 +105,8 @@ def test_live_audio_reuses_widget_during_recording_and_reports_saved(window):
     assert win.controller.take['status'] == 'complete'
     assert win.open_recording.isEnabled()
     assert 'fixed for this run' in win.lock_note.text()
+    win._toggle_preview_mode()
+    assert win.result_widget.isVisible() and 'Saved' in win.result_label.text()
 
 
 def test_warning_and_export_failure_remain_visible_in_preview_mode(window):
@@ -122,3 +125,24 @@ def test_warning_and_export_failure_remain_visible_in_preview_mode(window):
     win.readiness_action.click()
     assert win.log_box.isVisible()
     assert 'WAV retained' in win.result_label.text()
+
+
+def test_cage_export_guard_and_keyboard_labels_are_visible(window):
+    app, win = window
+    assert win.record_mode.accessibleName() == 'Recording mode'
+    assert win.readiness_label.accessibleName()
+    assert win.result_label.accessibleName()
+    win.controller.begin_roi_export()
+    try:
+        win.update_controls()
+        assert not win.record.isEnabled()
+        assert 'Cage export is running' in win.readiness_label.text()
+        assert 'Cage export is running' in win.readiness_label.accessibleName()
+    finally:
+        win.controller.end_roi_export()
+        win.update_controls()
+    assert win.record.isEnabled()
+    assert win.record.accessibleName() == 'Record'
+    assert win.stop.accessibleName() == 'Stop recording'
+    assert win.trigger_status.accessibleName() == win.trigger_status.text()
+    assert win._enlarge_buttons['seek'].accessibleName() == 'Enlarge Seek camera preview'

@@ -268,6 +268,75 @@ def test_canvas_move_resize_and_letterbox(app):
     canvas.close()
 
 
+def test_coordinate_fields_create_and_edit_cages_with_keyboard(app, tmp_path):
+    from PySide6 import QtCore as C, QtTest, QtWidgets
+    from thermal_roi_gui import RoiWindow, inspect_recording
+
+    root = tmp_path / 'source'
+    recording(root)
+    window = RoiWindow()
+    window.recording_loaded(inspect_recording(root))
+    window.show()
+    app.processEvents()
+    assert not window.coordinates.isEnabled()
+    add_button = next(button for button in window.findChildren(QtWidgets.QPushButton) if button.text() == 'Add cage')
+    add_button.setFocus()
+    QtTest.QTest.keyClick(add_button, C.Qt.Key.Key_Space)
+    assert window.coordinates.isEnabled()
+    assert [field.accessibleName() for field in window.coordinate_fields] == [
+        'Cage x in pixels', 'Cage y in pixels', 'Cage width in pixels', 'Cage height in pixels']
+    for field, value in zip(window.coordinate_fields, (0, 0, 4, 6)):
+        field.setFocus()
+        field.selectAll()
+        QtTest.QTest.keyClicks(field, str(value))
+    window.apply_coordinates.setFocus()
+    QtTest.QTest.keyClick(window.apply_coordinates, C.Qt.Key.Key_Space)
+    assert window.cages[0]['roi'] == [0, 0, 4, 6]
+    window.change_roi(-1, [4, 0, 4, 6])
+    window.cage_list.setCurrentRow(0)
+    window.review.setChecked(True)
+    window.coordinate_fields[2].setValue(5)
+    window.apply_coordinates.click()
+    assert window.cages[0]['roi'] == [0, 0, 4, 6]
+    assert window.review.isChecked()
+    assert 'overlap' in window.status.text().lower()
+    window.coordinate_fields[0].setValue(1)
+    window.coordinate_fields[2].setValue(3)
+    window.apply_coordinates.click()
+    assert window.cages[0]['roi'] == [1, 0, 3, 6]
+    assert not window.review.isChecked()
+    assert window.canvas.accessibleDescription()
+    assert window.slider.accessibleName()
+    assert window.export_status.text() in window.export_status.accessibleName()
+    window.close()
+
+
+def test_roi_window_fits_small_screen_and_keeps_controls_reachable(app):
+    from thermal_roi_gui import RoiWindow
+    window = RoiWindow()
+    window.show()
+    window.resize(880, 500)
+    app.processEvents()
+    assert window.width() <= 880 and window.height() <= 500
+    assert window.export_button.isVisible() and window.progress_bar.isVisible()
+    window.close()
+
+
+def test_roi_inherits_application_font(app):
+    from PySide6 import QtGui
+    from thermal_roi_gui import RoiWindow
+    original = QtGui.QFont(app.font())
+    changed = QtGui.QFont(original)
+    changed.setPointSize(12)
+    app.setFont(changed)
+    try:
+        window = RoiWindow()
+        assert window.coordinate_fields[0].font().pointSize() == 12
+        window.close()
+    finally:
+        app.setFont(original)
+
+
 def test_worker_completion_and_failure(app, tmp_path):
     import time
     from thermal_roi_gui import RoiWindow
@@ -330,6 +399,7 @@ def test_export_state_visible_through_worker_lifecycle(app, tmp_path, outcome):
         assert 'EXPORT RUNNING' in window.export_status.text()
         assert window.cancel_button.isEnabled()
         assert not window.export_button.isEnabled()
+        assert not window.include_video.isEnabled()
         window.show_progress(20, .025, 60)
         assert '20 frames' in window.export_status.text()
         assert window.progress_bar.format() == '2.5% exported'

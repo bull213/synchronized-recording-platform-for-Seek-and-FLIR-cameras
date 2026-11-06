@@ -7,6 +7,11 @@ Recorder acquisition, coordination, UI, and cage ROI tools live under
 aliases. The combined recorder starts with `python -m ultramic_studio.recorder`
 or `Start_Sync_Recorder.cmd`; the standalone ROI launcher remains available.
 
+The coordinator owns recording state, threads, and timing. Take reporting and
+microphone output helpers live alongside it. Seek's native signatures and frame
+header are in `cameras/seek_sdk.py`; preview widgets and cage canvas, preview,
+and worker helpers are in their respective `ui/` and `roi/` packages.
+
 Install Python 3.12 x64 and the complete development requirements:
 
 ```bat

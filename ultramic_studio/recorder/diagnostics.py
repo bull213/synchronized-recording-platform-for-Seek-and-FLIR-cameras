@@ -141,6 +141,8 @@ def self_test(report=None):
         # its video path and native-coordinate thermal export.
         from .roi.exporter import export_rois, first_frame, make_config
         from .roi.gui import RoiWindow
+        from ultramic_studio.theme import CHECKMARK
+        assert Path(CHECKMARK).is_file(), 'Recorder checkbox indicator is missing'
         roi_window = RoiWindow(coordinator=controller)
         try:
             assert roi_window.include_video.isChecked()
