@@ -1,8 +1,9 @@
 # Cage ROI thermal exporter
 
-Run **Setup_Windows.cmd --camera** once, then double-click **Start_Cage_ROI.cmd**
-in the project folder. This tool uses the
-project's existing Python environment and works independently of the recorder.
+In the combined recorder, choose **View → Cage ROI export…** to open the tool
+in a separate window. A finished current session is offered automatically; use
+**Open recording…** to choose another. You can also run **Setup_Windows.cmd --camera**
+once, then double-click **Start_Cage_ROI.cmd** in the source project.
 
 1. Open a **finished recording folder** containing `seek_thermal.csv` and
    `seek_log.csv`. The native thermal image appears immediately after the log is read.
@@ -12,8 +13,8 @@ project's existing Python environment and works independently of the recorder.
    or choose **Redraw selected**. Cage rectangles cannot overlap.
 4. Use the time slider and **Preview selected time** to inspect cage positions
    later in the recording. This follows the log's video segment and frame index;
-   playback seconds are not used as acquisition timestamps. Export always uses
-   thermal pixels. **Native thermal frame** loads the calibrated thermal image at
+   playback seconds are not used as acquisition timestamps. Thermal export uses
+   native pixels. **Native thermal frame** loads the calibrated thermal image at
    the slider position. The first jump forward scans frame offsets in the large
    source file; those offsets are cached for faster subsequent visits during the session.
    The cage thumbnail shows the entire ROI scaled down while preserving its shape;
@@ -22,8 +23,13 @@ project's existing Python environment and works independently of the recorder.
 5. Check **Cage boundaries checked for this recording**. Optionally save the
    selections for reuse. Loading selections requires reviewing them again;
    configurations with a different thermal resolution are rejected.
-6. Click **Export pixels + temperatures**, then choose a destination parent folder.
+6. Choose whether to export cropped Seek video, click **Export pixels + temperatures**,
+   then choose a destination parent folder. Video is selected by default in the recorder.
    Each export creates a new run folder and processes all frames and takes.
+
+Finish the current take and disarm triggers before exporting. The recorder blocks
+starting or arming a recording until export completes or is cancelled. The
+standalone tool does not coordinate with a separate recorder process.
 
 The banner above Export states whether the export has started. If it says
 **Export not running**, follow its instruction (usually check the cage-boundary
@@ -39,6 +45,13 @@ the maximum is a surface-temperature proxy, not a measurement of core temperatur
 
 ## Files and measurements
 
+When video export is selected, each cage gets cropped Seek MP4 parts and a frame
+map with source frame identifiers and timestamps. Source take and part boundaries
+and playback rates are preserved; acquisition times come from the frame map.
+Odd-sized crops are padded on the bottom or right for encoding; the thermal arrays
+retain exact ROI dimensions. The videos are re-encoded visual references. Audio and
+FLIR videos are not split.
+
 Each mouse folder contains `pixels/part_000001.npz`, etc., and
 `temperature_timeseries.csv`. At most 256 frames go into a pixel archive; the
 chunk size is reduced for large selections to keep combined crop buffers within
@@ -53,7 +66,7 @@ Load them using `numpy.load(path, allow_pickle=False)`; no pickle is required.
 Each chunk is read back and every array (including IDs and calibration indices)
 is checked before it is published. Standard NPZ/DEFLATE level 1 prioritizes export
 speed over the smallest possible files. This does not change stored values or
-require a different reader. See [performance measurements](ROI_PERFORMANCE.md).
+require a different reader.
 
 The summary CSV includes the same frame IDs and exact integer timestamps, a
 nanosecond UTC ISO string, mouse/genotype labels, ROI maximum and mean,
@@ -83,7 +96,8 @@ files change during extraction. Export disk errors retain an incomplete manifest
 ## Reproducible scripting
 
 Use `thermal_roi.make_config(recording, shape, cages)` and
-`thermal_roi.export_rois(recording, config, output_parent)`. A saved configuration
+`thermal_roi.export_rois(recording, config, output_parent, include_video=True)`
+to include video; the default remains thermal-only. A saved configuration
 can be loaded with `thermal_roi.load_config`; a different source must be reviewed
 and a new configuration made before extraction. The optional `max_frames` argument
 is for validation samples and records `scope=sample` in the manifest. The GUI

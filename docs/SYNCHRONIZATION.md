@@ -161,10 +161,10 @@ power failure or an unreported driver loss is not guaranteed.
 
 ## Implementation map
 
-`sync-rec.py` acquires the real cameras and stamps frame receipt times.
-`recording_coordinator.py` owns the shared take state and reference clock.
-`camera_files.py` writes camera outputs separately from callbacks.
+`ultramic_studio/recorder/cameras/capture.py` acquires cameras and stamps frame receipt times.
+`ultramic_studio/recorder/coordinator.py` owns the shared take state and reference clock.
+`ultramic_studio/recorder/storage.py` writes camera outputs separately from callbacks.
 `ultramic_studio/synchronized.py` adds timestamp-targeted sample selection to
-the standalone recorder engine. `unified_gui.py` reuses the standalone Qt
-spectrogram, review, and export UI. `camera_demo.py` supplies labelled synthetic
+the standalone recorder engine. `ultramic_studio/recorder/ui/window.py` reuses the standalone Qt
+spectrogram, review, and export UI. `ultramic_studio/recorder/cameras/demo.py` supplies labelled synthetic
 cameras for tests and demos without loading the camera SDKs.

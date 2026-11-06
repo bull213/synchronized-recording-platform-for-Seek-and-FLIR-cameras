@@ -18,13 +18,23 @@ from zipfile import ZipFile, ZIP_DEFLATED
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE))
-from camera_runtime import find_seek_dll
+from ultramic_studio.recorder.cameras.runtime import find_seek_dll
 from scripts.package_source import source_files
 
 PACKAGES = ('numpy', 'opencv-python', 'PySide6', 'shiboken6', 'pyqtgraph',
             'sounddevice', 'pyserial', 'lameenc', 'spinnaker-python', 'pyinstaller')
 VC_RUNTIMES = {'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
                'vcruntime140.dll', 'vcruntime140_1.dll', 'vcomp140.dll'}
+
+
+def copy_editable_source(destination, source=SOURCE):
+    """Copy only files in the reviewed source inventory."""
+    destination = Path(destination)
+    destination.mkdir()
+    for name, path in source_files(source):
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
 
 
 def digest(path):
@@ -115,11 +125,9 @@ def main():
         if path:
             vc_files.append((str(path), '.'))
     spec.write_text(f'''from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
-datas = [({str(SOURCE / 'sync-rec.py')!r}, '.')]
+datas = []
 binaries = [({str(seek)!r}, 'camera_sdk/seek')] + {vc_files!r}
-hiddenimports = ['camera_demo', 'camera_files', 'recording_coordinator', 'camera_recorder_gui',
-                 'gui_theme', 'unified_gui', 'camera_runtime', 'camera_health', 'camera_reliability',
-                 'seek_calibration', 'recorder_setup', 'ultramic_studio.winmm']
+hiddenimports = ['ultramic_studio.winmm']
 for package in ('PySpin', 'sounddevice', 'lameenc'):
     data, native, hidden = collect_all(package)
     # sounddevice ships both architectures; this app targets Windows x64 only.
@@ -159,12 +167,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name='SyncRecorder', strip=False, upx=F
             shutil.copy2(path, target)
     shutil.copytree(seek_driver, folder / 'drivers' / 'Seek')
     shutil.copytree(args.flir_driver, folder / 'drivers' / 'FLIR_USB3')
-    editable = folder / 'source'
-    editable.mkdir()
-    for name, path in approved:
-        target = editable / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
+    copy_editable_source(folder / 'source')
     licenses = folder / 'licenses'
     licenses.mkdir()
     shutil.copy2(Path(sys.base_prefix) / 'LICENSE.txt', licenses / 'Python_LICENSE.txt')
