@@ -40,4 +40,5 @@ def test_portable_recording_self_test_writes_a_success_report(tmp_path):
     content = report.read_text(encoding='utf-8')
     assert 'SELF-TEST: PASSED' in content
     assert 'two FLIR MP4s' in content
+    assert 'Cage selector and per-cage thermal/video export' in content
     assert 'hardware was not opened' in content

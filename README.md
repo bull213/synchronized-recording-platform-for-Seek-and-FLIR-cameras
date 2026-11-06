@@ -75,10 +75,11 @@ for registering a calibration you have independently measured.
 
 ## Cage ROI exporter
 
-Run `Setup_Windows.cmd --camera`, then `Start_Cage_ROI.cmd` to open a finished
-recording and draw, move, or resize a separate cage region for each mouse.
-Review the boundaries and export calibrated native pixels plus per-frame
-temperature summaries. The window shows progress, elapsed time, estimated time
+In the combined recorder choose **View → Cage ROI export…**, or run
+`Start_Cage_ROI.cmd`, to open a finished recording and draw, move, or resize a
+separate cage region for each mouse.
+Review the boundaries and export native thermal pixels, per-frame temperature
+summaries, and optional cropped Seek video parts. The window shows progress, elapsed time, estimated time
 remaining, cancellation, and persistent completion or failure status.
 
 The time slider selects both video and native thermal previews. Enlarged cage

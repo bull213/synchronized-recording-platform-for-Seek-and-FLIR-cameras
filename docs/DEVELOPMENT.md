@@ -2,6 +2,11 @@
 
 ## Recorder checks
 
+Recorder acquisition, coordination, UI, and cage ROI tools live under
+`ultramic_studio/recorder/`. Existing root-level module names are compatibility
+aliases. The combined recorder starts with `python -m ultramic_studio.recorder`
+or `Start_Sync_Recorder.cmd`; the standalone ROI launcher remains available.
+
 Install Python 3.12 x64 and the complete development requirements:
 
 ```bat
