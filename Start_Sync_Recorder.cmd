@@ -1,16 +1,21 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+pushd "%~dp0" || exit /b 1
 if exist "SyncRecorder.exe" (
     "SyncRecorder.exe" %*
-    if errorlevel 1 pause
-    exit /b
+    goto finished
 )
 if not exist ".venv\Scripts\python.exe" (
-    echo Run Setup_Windows.cmd --camera first to install the source dependencies.
-    echo See docs\SETUP.md for camera SDK installation or use the synthetic demo.
+    echo Extract the complete exported SyncRecorder ZIP first.
+    echo For editable source, use the configured Python environment described in README.md.
     pause
+    popd
     exit /b 1
 )
-".venv\Scripts\python.exe" launch_sync.py %*
-if errorlevel 1 pause
+".venv\Scripts\python.exe" -m ultramic_studio.recorder %*
+
+:finished
+set "recorder_exit_code=%errorlevel%"
+if not "%recorder_exit_code%"=="0" pause
+popd
+exit /b %recorder_exit_code%

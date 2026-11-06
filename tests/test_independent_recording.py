@@ -170,9 +170,9 @@ def test_camera_module_import_does_not_require_camera_sdks(monkeypatch):
     def fail():
         raise AssertionError('Seek SDK must load only when connecting')
     monkeypatch.setattr(camera_runtime, 'find_seek_dll', fail)
-    namespace = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'sync-rec.py'))
-    assert namespace['seek'] is None
-    assert namespace['PySpin'] is None
+    from ultramic_studio.recorder.cameras import capture
+    assert capture.seek is None
+    assert capture.PySpin is None
 
 
 def test_gui_modes_and_draggable_preview_panels(tmp_path, monkeypatch):

@@ -76,7 +76,7 @@ devices. `--self-test` uses only synthetic cameras and audio and needs no SDKs.
 Only **None (camera temperature)** is supplied. Keep it selected unless you have
 validated a calibration for your setup. To register one locally, add a
 `SeekCalibration(name, label, scale, offset_c)` entry to `SEEK_CALIBRATIONS` in
-`seek_calibration.py`. The conversion is `scale * camera_c + offset_c`.
+`ultramic_studio/recorder/cameras/calibration.py`. The conversion is `scale * camera_c + offset_c`.
 Do not publish lab-specific names or coefficients unintentionally when sharing edits.
 
 Calibration is locked while armed, recording, or finalizing. An unknown saved
