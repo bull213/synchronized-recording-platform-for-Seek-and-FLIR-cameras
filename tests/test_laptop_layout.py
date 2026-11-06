@@ -63,7 +63,7 @@ def test_laptop_controls_fit_and_previews_expand(window, physical_width, physica
     assert not win.settings_scroll.isVisible()
     assert win.preview_scroll.viewport().width() > before
     win.preview_button.click()
-    pump(app, lambda: win._preview_rows[0].count() == 3)
+    pump(app, lambda: bool(win._preview_rows) and win._preview_rows[0].count() == 3)
     assert not win.camera_options.isVisible()
     assert not win.log_box.isVisible()
     assert win.stop.isVisible() and win.elapsed.isVisible()
