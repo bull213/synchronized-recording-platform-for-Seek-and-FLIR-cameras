@@ -1,7 +1,6 @@
 """One recording state machine for cameras, optional audio, and external triggers."""
 from __future__ import annotations
 
-import json
 import math
 import queue
 import shutil
@@ -19,6 +18,8 @@ from ultramic_studio.recorder.health import CameraHealth
 from ultramic_studio.recorder.reliability import (FrameBuffer, RecordingJournal, MIN_FREE_BYTES,
                                 frame_stream, frame_time, frame_take, log)
 from ultramic_studio.recorder.cameras.calibration import get_seek_calibration
+from ultramic_studio.recorder.audio_output import finish_mp3
+from ultramic_studio.recorder.take_reporting import collect_audio_report, new_take_report
 from ultramic_studio.core import atomic_json, safe_label, utc_now
 from ultramic_studio.export import export_mp3
 
@@ -245,26 +246,12 @@ class RecordingCoordinator(CameraHealth):
             times = [snap[4] for snap in self.recent_seek]
             intervals = [end - start for start, end in zip(times, times[1:]) if end > start]
             seek_fps = 1e9 / median(intervals) if intervals else 30.0
-        self.take = dict(schema_version=2, take_id=self.take_number, label=info.get('label') or self.options['label'],
-                         recording_mode=self.options['recording_mode'],
-                         sample_mode=self.options['sample_mode'],
-                         seek_video_fps=seek_fps,
-                         seek_calibration=get_seek_calibration(self.options['seek_calibration']).metadata(),
-                         shutter_settings=dict(self.shutter_settings),
-                         status='starting', requested_utc=utc_now(),
-                         request_monotonic_ns=request_ns, shared_start_monotonic_ns=None,
-                         shared_stop_monotonic_ns=None, microphone_enabled=self.options['microphone'],
-                         audio_status='pending' if self.options['microphone'] else 'disabled',
-                         audio_demo=bool(self.audio and self.audio.config.demo and self.options['microphone']),
-                         camera_demo=bool(getattr(self.core, 'demo', False)),
-                         first_streams={}, frame_counts={}, frame_id_gaps={}, events=[], errors=[],
-                         event_count=0, events_truncated=False,
-                         event_log=f'take{self.take_number:02d}_events.jsonl',
-                         received_frame_counts={}, written_frame_counts={}, dropped_frame_counts={},
-                         recovery_counts={}, has_gaps=False, gaps=[], gap_count=0, segments={},
-                         camera_serials={str(cam['index']): cam['serial'] for cam in self.flir_cams},
-                         timing_note='Seek and FLIR times are host frame receipt times. Audio uses labelled '
-                         'capture-time estimates. Raw device clocks are independent; physical simultaneity is unverified.')
+        self.take = new_take_report(
+            take_number=self.take_number, options=self.options, info=info, request_ns=request_ns,
+            seek_fps=seek_fps, calibration=get_seek_calibration(self.options['seek_calibration']).metadata(),
+            shutter_settings=self.shutter_settings, requested_utc=utc_now(),
+            audio_demo=bool(self.audio and self.audio.config.demo and self.options['microphone']),
+            camera_demo=bool(getattr(self.core, 'demo', False)), flir_cams=self.flir_cams)
         self._last_flir_ids = {}
         self._last_seek_ns = None
         self.next_seek_ns = None
@@ -616,47 +603,11 @@ class RecordingCoordinator(CameraHealth):
                                          deepcopy(self.take), bool(self.audio and self.audio.config.auto_mp3)))
 
     def _finish_mp3(self):
-        if 'audio_path' not in self.take:
-            return
-        session = self.run_dir / self.take['audio_path']
-        meta = json.loads((session / 'session.json').read_text(encoding='utf-8'))
-        wavs = [session / item['file'] for item in meta['segments']]
-        if any(path.resolve().parent != session.resolve() for path in wavs):
-            raise ValueError('Invalid audio segment path.')
-        target = self.run_dir / f'microphone_take{self.take_number:02d}.mp3'
-        try:
-            export_mp3(wavs, target, time_expansion=1, write_metadata=False)
-        except Exception as exc:
-            raise RuntimeError(f'MP3 export failed; recoverable WAV retained at {session}: {exc}') from exc
-        self.take['mp3_path'] = target.name
-        # Only remove the private directory created for this take after export succeeds.
-        staging = self._audio_staging.resolve()
-        if staging.parent != self.run_dir.resolve() or not staging.name.startswith('.audio_'):
-            raise RuntimeError('Unexpected temporary audio directory; retained for recovery.')
-        shutil.rmtree(staging)
-        self._audio_staging = None
+        if finish_mp3(self.take, self.run_dir, self.take_number, self._audio_staging, encode=export_mp3):
+            self._audio_staging = None
 
     def _collect_audio_report(self):
-        if not self.take['microphone_enabled'] or 'audio_path' not in self.take:
-            return
-        path = self.run_dir / self.take['audio_path']
-        manifest = path / 'session.json'
-        if not manifest.exists():
-            self.take['audio_status'] = 'error'
-            self.take['errors'].append('Audio session manifest is missing.')
-            return
-        meta = json.loads(manifest.read_text(encoding='utf-8'))
-        self.take['audio_status'] = meta['status']
-        self.take['audio_samples'] = meta['recorded_samples']
-        self.take['separate_pretrigger_samples'] = meta.get('separate_pretrigger_samples', 0)
-        first = meta.get('first_saved_monotonic_ns')
-        if first is not None:
-            self.take['first_streams']['microphone'] = dict(host_monotonic_ns=first,
-                                                          offset_from_seek_ns=first - self.take['shared_start_monotonic_ns'],
-                                                          timestamp_source=meta.get('timestamp_source'),
-                                                          file_sample=0)
-        if meta['status'] != 'complete' or not meta['recorded_samples']:
-            self.take['errors'].extend(meta.get('errors') or ['Audio contains no completed samples.'])
+        collect_audio_report(self.take, self.run_dir)
 
     def _save_report(self):
         if not self.journal or not self.take or self.take['recording_mode'] not in ('combined', 'seek_only'):

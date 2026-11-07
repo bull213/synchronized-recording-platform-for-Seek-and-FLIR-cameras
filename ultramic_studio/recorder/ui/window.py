@@ -7,11 +7,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import cv2
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets as W
 
 from ultramic_studio.theme import RECORDER_STYLE
+from ultramic_studio.recorder.ui import camera_previews
 from ultramic_studio.recorder.ui.presentation import RecorderPresentation
 from ultramic_studio.recorder.coordinator import RecordingCoordinator
 from ultramic_studio.recorder.cameras.calibration import SEEK_CALIBRATIONS, get_seek_calibration
@@ -64,6 +64,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         root = self.centralWidget()
         self.header_widget.hide()
         self.record_mode = W.QComboBox()
+        self.record_mode.setAccessibleName('Recording mode')
         self.record_mode.addItems(['Cameras only', 'Cameras + microphone',
                                    'FLIR only (.mp4)', 'Microphone only (.mp3)', 'Seek only'])
         self.record_mode.currentIndexChanged.connect(self._mode_changed)
@@ -162,27 +163,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         self.update_controls()
 
     def _add_camera_panel(self, key, title, index):
-        group = W.QGroupBox(title)
-        layout = W.QVBoxLayout(group)
-        device_status = label('Waiting for frames…', True)
-        device_status.setWordWrap(True)
-        layout.addWidget(device_status)
-        self._device_labels[key] = device_status
-        preview = W.QLabel('Waiting for frames…')
-        preview.setObjectName('preview')
-        preview.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        preview.setMinimumSize(120, 48)
-        preview.setSizePolicy(W.QSizePolicy.Policy.Ignored, W.QSizePolicy.Policy.Ignored)
-        layout.addWidget(preview, 1)
-        enlarge = button('Enlarge', lambda checked=False, k=key: self._enlarge_camera(k))
-        layout.addWidget(enlarge)
-        preview.setToolTip('Double-click to enlarge this camera or return to all cameras.')
-        preview.installEventFilter(self)
-        group.setParent(self.preview_widget)
-        self._camera_panels[key] = group
-        self._enlarge_buttons[key] = enlarge
-        self._preview_labels[key] = preview
-        self._reflow_timer.start(0)
+        return camera_previews.add_camera_panel(self, key, title, index)
 
     def _build_layout_controls(self, root):
         root.layout().setContentsMargins(8, 6, 8, 6)
@@ -200,7 +181,9 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         duration_layout.deleteLater()
         self.badge.setWordWrap(True)
         self.badge.setMinimumWidth(0)
-        transport.addWidget(self.badge, 1)
+        self.badge.setSizePolicy(W.QSizePolicy.Policy.Maximum, W.QSizePolicy.Policy.Preferred)
+        transport.addWidget(self.badge)
+        transport.addStretch(1)
         rows.addLayout(transport)
         views = W.QHBoxLayout()
         self.record_mode.setMinimumContentsLength(10)
@@ -356,39 +339,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         return super().eventFilter(watched, event)
 
     def _reflow_previews(self):
-        width = self.preview_scroll.viewport().width()
-        # Three panels fit a compact laptop once settings are hidden. Avoid
-        # wasting scarce vertical space on a second row in that view.
-        columns = 3 if width >= 780 else 2 if width >= 520 else 1
-        if self.height() < 620 and width >= 500:
-            columns = 3
-        keys = [self._focused_camera] if self._focused_camera else list(self._camera_panels)
-        signature = (columns, tuple(keys))
-        if signature == self._layout_signature:
-            return
-        self._layout_signature = signature
-        # Keep live preview widgets; only rearrange their splitter containers.
-        for panel in self._camera_panels.values():
-            panel.hide()
-            panel.setParent(self.preview_scroll)
-        for row in self._preview_rows:
-            row.setParent(None)
-            row.deleteLater()
-        self._preview_rows.clear()
-        for index, key in enumerate(keys):
-            if index % columns == 0:
-                row = W.QSplitter(QtCore.Qt.Orientation.Horizontal)
-                row.setChildrenCollapsible(False)
-                row.setHandleWidth(8)
-                self.preview_widget.addWidget(row)
-                self._preview_rows.append(row)
-            row.addWidget(self._camera_panels[key])
-            self._camera_panels[key].show()
-            self._enlarge_buttons[key].setText('All cameras' if self._focused_camera else 'Enlarge')
-        self.preview_widget.setMinimumHeight(200 * len(self._preview_rows))
-        for row in self._preview_rows:
-            row.setSizes([1000] * row.count())
-        self.preview_widget.setSizes([1000] * len(self._preview_rows))
+        return camera_previews.reflow_previews(self)
 
     def _recording_options(self):
         index = self.record_mode.currentIndex()
@@ -709,23 +660,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
                 self._cameras_closed = True
 
     def _render_camera_previews(self):
-        if not self.preview_scroll.isVisible():
-            return
-        with self.core.latest_ir_lock:
-            snap = self.core.latest_ir
-        frames = {'seek': cv2.cvtColor(snap[1], cv2.COLOR_BGRA2BGR)} if snap else {}
-        with self.core.flir_preview_lock:
-            frames.update({f'flir_{idx}': frame.copy() for idx, frame in self.core.flir_previews.items()})
-        for key, frame in frames.items():
-            preview = self._preview_labels.get(key)
-            if preview is None or not preview.isVisible():
-                continue
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            height, width = rgb.shape[:2]
-            image = QtGui.QImage(rgb.data, width, height, rgb.strides[0], QtGui.QImage.Format.Format_RGB888).copy()
-            pixmap = QtGui.QPixmap.fromImage(image).scaled(preview.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                                                         QtCore.Qt.TransformationMode.SmoothTransformation)
-            preview.setPixmap(pixmap)
+        return camera_previews.render_camera_previews(self)
 
     def tick(self):
         self._finish_mic_action()

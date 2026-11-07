@@ -125,7 +125,7 @@ def main():
         if path:
             vc_files.append((str(path), '.'))
     spec.write_text(f'''from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
-datas = []
+datas = [({str(SOURCE / 'ultramic_studio' / 'assets' / 'check.svg')!r}, 'ultramic_studio/assets')]
 binaries = [({str(seek)!r}, 'camera_sdk/seek')] + {vc_files!r}
 hiddenimports = ['ultramic_studio.winmm']
 for package in ('PySpin', 'sounddevice', 'lameenc'):

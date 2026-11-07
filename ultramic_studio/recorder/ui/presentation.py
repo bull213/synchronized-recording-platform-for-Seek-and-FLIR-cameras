@@ -16,6 +16,8 @@ def readiness(controller, sample_mode, closing=False):
             return False, 'Starting: waiting for the first selected frames.', ''
         if controller.state == 'recording':
             return False, 'Recording selected devices. Stop finishes this take.', ''
+        if getattr(controller, 'roi_export_active', False):
+            return False, 'Cage export is running. Wait for it to finish before recording.', ''
         if controller._writer_unhealthy:
             return False, 'Recording writer unavailable. See diagnostics before restarting.', 'log'
         if controller._recovery_busy() or not controller.prepare_done.is_set():
@@ -106,9 +108,12 @@ class RecorderPresentation:
         self._export_status = ''
         self.stop.setObjectName('stop')
         self.record.setText('●  Record')
+        self.record.setAccessibleName('Record')
         self.stop.setText('■  Stop')
+        self.stop.setAccessibleName('Stop recording')
         self.trigger_status = W.QLabel('Triggers disarmed')
         self.trigger_status.setObjectName('triggerStatus')
+        self.trigger_status.setAccessibleName('Trigger status')
         self.layout_controls.layout().itemAt(0).layout().addWidget(self.trigger_status)
 
         # The status banner is outside scroll areas and remains in preview mode.
@@ -118,6 +123,7 @@ class RecorderPresentation:
         self.readiness_label = W.QLabel()
         self.readiness_label.setObjectName('notice')
         self.readiness_label.setWordWrap(True)
+        self.readiness_label.setAccessibleName('Recording readiness and warnings')
         self.readiness_label.setMinimumWidth(0)
         bar.addWidget(self.readiness_label, 1)
         self.readiness_action = W.QPushButton('Details')
@@ -211,6 +217,7 @@ class RecorderPresentation:
         row = W.QHBoxLayout(result)
         row.setContentsMargins(0, 0, 0, 0)
         self.result_label = W.QLabel('No completed take yet')
+        self.result_label.setAccessibleName('Recording result')
         self.result_label.setWordWrap(True)
         row.addWidget(self.result_label, 1)
         self.open_recording = W.QPushButton('Open recording folder')
@@ -283,16 +290,19 @@ class RecorderPresentation:
         self.record.setToolTip(explanation)
         self._status_target = 'log' if self._notice else target
         self.readiness_label.setText(explanation + ('  •  ' + self._notice if self._notice else ''))
+        self.readiness_label.setAccessibleName('Recording readiness and warnings: ' + self.readiness_label.text())
         tone(self.readiness_label, self._notice_tone if self._notice else 'normal' if enabled or ctl.is_recording else 'warning')
         self.readiness_action.setVisible(bool(self._status_target))
         self.readiness_action.setText('Diagnostics' if self._status_target == 'log' else 'Show settings')
         self.dismiss_notice.setVisible(bool(self._notice))
         self.trigger_status.setText('Triggers ARMED' if ctl.armed else 'Triggers disarmed')
+        self.trigger_status.setAccessibleName(self.trigger_status.text())
+        tone(self.trigger_status, 'warning' if ctl.armed else 'normal')
         state_text = {'starting': 'Starting', 'recording': 'Recording', 'finalizing': 'Finishing files'}.get(ctl.state, 'Ready' if enabled else 'Not ready')
         demo = getattr(self.core, 'demo', False) or bool(self.engine and self.engine.config.demo)
         self.badge.setStyleSheet('')
         self.badge.setText(('DEMO  ·  ' if demo else '') + ('Closing' if self._closing else state_text))
-        tone(self.badge, 'recording' if ctl.is_recording else 'success' if enabled else 'warning')
+        tone(self.badge, 'recording' if ctl.state == 'recording' else 'success' if enabled else 'warning')
         self.lock_note.setText('Settings locked while recording or triggers are armed.' if ctl.state != 'idle' or ctl.armed else
                                'Session folder and label are fixed for this run. Restart the app to change them.' if ctl.run_dir else '')
         self.lock_note.setVisible(bool(self.lock_note.text()))
@@ -340,6 +350,7 @@ class RecorderPresentation:
         elif self._export_status:
             text += '  ·  ' + self._export_status
         self.result_label.setText(text)
+        self.result_label.setAccessibleName('Recording result: ' + text)
         self.open_recording.setEnabled(ctl.run_dir is not None)
-        self.result_widget.setVisible(not self._preview_mode)
+        self.result_widget.setVisible(not self._preview_mode or bool(self._last_result) or bool(self.exports) or bool(self._export_status))
         self._place_live_audio()

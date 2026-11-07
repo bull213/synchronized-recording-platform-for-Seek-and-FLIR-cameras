@@ -1,5 +1,14 @@
 # Source validation
 
+## Incremental recorder refactor
+
+The public source passed **206 tests, with 2 skipped**, on Windows with Python
+3.12. Synthetic checks cover recorder timing and audio, native Seek declarations,
+preview layout, keyboard cage coordinates, and cage thermal/video exports.
+Before/after synthetic recordings matched synchronization fields, CSVs, thermal
+arrays, and decoded video frames. The local Windows portable build passed its
+setup check and synthetic self-test; physical hardware capture was not tested.
+
 ## Recorder GUI update — 4 November 2026
 
 The prepared public source passed **170 tests, with 2 expected skips**, on Windows

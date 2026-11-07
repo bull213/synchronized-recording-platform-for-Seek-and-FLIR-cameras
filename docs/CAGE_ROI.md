@@ -7,10 +7,11 @@ once, then double-click **Start_Cage_ROI.cmd** in the source project.
 
 1. Open a **finished recording folder** containing `seek_thermal.csv` and
    `seek_log.csv`. The native thermal image appears immediately after the log is read.
-2. Click **Add cage** and drag around one cage. Repeat for the other cage.
+2. Click **Add cage** and drag around one cage, or enter native pixel coordinates
+   and choose **Apply coordinates**. Repeat for the other cage.
    Defaults are `WT_01`, `WT_02`, etc. Use **Rename / genotype** for other labels.
 3. Click a rectangle to select it. Drag inside to move it, drag a corner to resize,
-   or choose **Redraw selected**. Cage rectangles cannot overlap.
+   edit its coordinates, or choose **Redraw selected**. Cage rectangles cannot overlap.
 4. Use the time slider and **Preview selected time** to inspect cage positions
    later in the recording. This follows the log's video segment and frame index;
    playback seconds are not used as acquisition timestamps. Thermal export uses
