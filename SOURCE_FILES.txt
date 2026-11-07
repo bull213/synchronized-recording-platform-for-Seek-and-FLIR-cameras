@@ -123,3 +123,14 @@ ultramic_studio/triggers.py
 ultramic_studio/winmm.py
 unified_gui.py
 tests/test_recorder_startup.py
+tests/test_seek_sdk_abi.py
+tests/test_take_reporting.py
+tests/test_ui_theme.py
+ultramic_studio/assets/check.svg
+ultramic_studio/recorder/audio_output.py
+ultramic_studio/recorder/cameras/seek_sdk.py
+ultramic_studio/recorder/roi/canvas.py
+ultramic_studio/recorder/roi/preview.py
+ultramic_studio/recorder/roi/worker.py
+ultramic_studio/recorder/take_reporting.py
+ultramic_studio/recorder/ui/camera_previews.py

@@ -155,6 +155,18 @@ def test_double_click_aspect_ratio_and_restore_preferences(window):
         pump(app, lambda: restored._shutdown_complete, seconds=25)
 
 
+def test_preview_reflow_keeps_the_same_live_widgets(window):
+    app, win = window
+    previews = dict(win._preview_labels)
+    panels = dict(win._camera_panels)
+    win._enlarge_camera('seek')
+    pump(app, lambda: win._focused_camera == 'seek' and previews['seek'].isVisible())
+    win._enlarge_camera('seek')
+    pump(app, lambda: win._focused_camera is None and all(panel.isVisible() for panel in panels.values()))
+    assert all(win._preview_labels[key] is preview for key, preview in previews.items())
+    assert all(win._camera_panels[key] is panel for key, panel in panels.items())
+
+
 def test_calibration_selector_is_locked_for_armed_and_active_takes(window):
     app, win = window
     assert win.calibration.currentData() == 'none'
