@@ -2,8 +2,8 @@ import json
 import socket
 import time
 
-from camera_demo import DemoCameraCore
-from recording_coordinator import RecordingCoordinator
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.coordinator import RecordingCoordinator
 from ultramic_studio.audio import DemoSource
 from ultramic_studio.core import RecordingConfig
 from ultramic_studio.synchronized import SynchronizedAudioEngine

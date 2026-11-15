@@ -1,17 +1,33 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ultramic Studio — source setup</title>
-<style>body{font:17px/1.6 system-ui,sans-serif;background:#101923;color:#e6edf3;max-width:950px;margin:40px auto;padding:0 24px}a{color:#79b8ff}code,pre{background:#192839;padding:3px 8px}pre{padding:16px}img{max-width:100%;height:auto}h1{line-height:1.2}</style></head>
-<body><h1>Ultramic Studio 0.1.2</h1>
-<p>This folder contains editable source. Install 64-bit Python 3.12 and the dependencies before launching.</p>
-<ol><li>Install <a href="https://www.python.org/downloads/windows/">Python 3.12 x64</a> with its Python launcher.</li>
-<li>Extract the source into a writable folder. Double-click <code>Setup_Windows.cmd</code>.</li>
-<li>Double-click <code>Start_Ultramic_Studio.cmd</code>. Choose the synthetic demo or your microphone input.</li>
-<li>Choose a recording folder outside this source checkout. Record and Stop control capture.</li></ol>
-<pre>Start_Ultramic_Studio.cmd --demo</pre>
-<p>The microphone identifier is optional and blank by default. WAV contains the original 200 kHz PCM;
-the optional 10× time-expanded MP3 is a listening copy.</p>
-<img src="docs/live-preview.png" alt="Live spectrogram with synthetic audio and generic settings">
-<p>For the combined camera recorder, open <a href="START_SYNC_HERE.html">the camera setup guide</a>.
-Read <a href="README.md">README</a> and <a href="docs/SETUP.md">detailed setup</a> for dependencies and hardware.</p>
-<p>Original source: <a href="LICENSE">MIT license</a>. Dependencies retain their own terms.</p></body></html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ultramic Studio — Start here</title>
+<style>
+body{margin:0;background:#0e1722;color:#e4edf8;font:16px/1.65 system-ui,sans-serif}main{max-width:1020px;margin:auto;padding:55px 28px}h1{font-size:44px;line-height:1.1;margin:12px 0}h2{margin-top:34px;color:#bce9df}p{max-width:900px}.eyebrow{color:#67c9b8;letter-spacing:.12em;font-size:12px;font-weight:700}.sub{color:#a9bbd0;font-size:19px}.card{padding:24px 28px;background:#192737;border:1px solid #32475d;border-radius:12px;margin:22px 0}code{color:#96e1d6;background:#0d1b29;padding:3px 6px;border-radius:4px}li{margin:10px 0}a{color:#7fd6cc}img{width:100%;border:1px solid #32475d;border-radius:12px}small{color:#9db0c8}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}@media(max-width:700px){.grid{display:block}h1{font-size:34px}}strong{color:#fff}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #33485d}
+</style><main>
+<div class="eyebrow">ULTRAMIC 200K · VERSION 0.1.2</div>
+<h1>Record the calls.<br>See the ultrasound.</h1>
+<p class="sub">Live spectrograms, original WAV recordings, audible MP3 copies, and external start/stop control.</p>
+<img src="docs/live-preview.png" alt="Ultramic Studio interface displaying simulated ultrasonic chirps">
+<small>Actual application screenshot in demo mode. These are synthetic calls.</small>
+<div class="card"><h2 style="margin-top:0">Start on Windows — no Anaconda needed</h2><ol>
+<li>Close Ultramic Studio and Avisoft.</li>
+<li>Extract this updated ZIP and open its <code>UltramicStudio</code> folder.</li>
+<li>Double-click <code>Start_Ultramic_Studio.cmd</code>. Python and the app's libraries are included in the portable package.</li>
+<li>Confirm <strong>0.1.2</strong> in the window title. Select <strong>Ultramic 200K 16 bi [MME]</strong>, then <strong>Connect &amp; monitor</strong>.</li>
+</ol><p>For <strong>64-bit Windows 10/11</strong>. Keep the entire folder together, including <code>runtime</code>, when copying it to another PC. No Anaconda, Python installation, or package downloads are needed.</p><p>Live monitoring does not save audio. Adjust <strong>Window</strong> for the time duration. Click <strong>Record</strong> to save a recording.</p></div>
+<div class="card"><h2 style="margin-top:0">Choose the frequency range</h2><p>Use <strong>Frequency → Min / Max</strong> above either spectrogram. Enter, for example, <strong>50</strong> and <strong>100 kHz</strong>, then press Enter. The controls work during live monitoring and while the display is frozen. <strong>Full range</strong> resets the view.</p><p>Your Ultramic's upper limit is <strong>100 kHz</strong> at 200,000 samples/s. An 80–120 kHz recording requires different hardware with a higher sampling rate. Display settings do not change the saved audio.</p></div>
+<details><summary>Optional: use an existing Anaconda or standard Python installation</summary><p>If you already created the <code>ultramic</code> Conda environment, <code>Start_Anaconda.cmd</code> remains available. For a source-only setup with standard Python:</p><ol>
+<li><strong>Extract the entire ZIP</strong> into a writable folder, such as Documents. Keep its folders together.</li>
+<li>Install <strong>64-bit Python 3.12</strong> from <a href="https://www.python.org/downloads/windows/">python.org</a>, including the Python launcher.</li>
+<li>Double-click <code>Setup_Windows.cmd</code>. This installs the app's dependencies once; Internet access is needed.</li>
+<li>Double-click <code>Start_Ultramic_Studio.cmd</code>.</li>
+</ol></details><p>To try the app without hardware, choose <strong>Demo · synthetic calls</strong>, then <strong>Connect &amp; monitor → Record → Stop</strong>.</p>
+<h2>Connect your microphone</h2>
+<p>Disconnect demo mode, plug in the Ultramic, refresh devices, and choose its <strong>MME</strong> entry. <strong>Windows WASAPI</strong> and <strong>Windows WDM-KS</strong> are also supported. Close Avisoft or other applications using the same microphone.</p>
+<p>The app requests <strong>200,000 Hz, mono, 16-bit</strong> and refuses a lower-rate fallback. Run <code>Check_Microphone.cmd</code> if it fails to connect. Its report is saved as <code>microphone_diagnostics.txt</code>.</p>
+<div class="grid"><div class="card"><h2 style="margin-top:0">Trigger from software</h2><p>Enable the software trigger and arm triggers. Your experiment program sends <code>START</code> or <code>STOP</code> to <code>127.0.0.1:8765</code>.</p><p>Python and MATLAB examples are in <code>examples</code>.</p></div><div class="card"><h2 style="margin-top:0">Trigger from TTL</h2><p>Use an external USB digital-input bridge. An Arduino Uno/Nano sketch is included. Default: D2 high starts, low stops. Separate start/stop pulse mode is also available.</p><p>See <code>docs/TRIGGERS.md</code> for wiring and setup.</p></div></div>
+<h2>What gets saved?</h2><table><tr><th>Original WAV</th><td>200 kHz / 16-bit / mono, unmodified. Use this for analysis. About 24 MB per minute.</td></tr><tr><th>Audible MP3</th><td>10× slower. A 60 kHz tone becomes 6 kHz. Useful for listening, not original ultrasound analysis.</td></tr><tr><th>Metadata</th><td>Device settings, sample positions, trigger events, and any detected capture errors.</td></tr></table>
+<p>Click <strong>Open last session</strong> to find the files. Click <strong>Play last MP3</strong> after the export finishes. Use <strong>Review recording</strong> to open a WAV and inspect a chosen time window.</p>
+<div class="card"><h2 style="margin-top:0">Before the first experiment</h2><p>This version passed software tests with synthetic audio. The physical Ultramic, Windows drivers, and Arduino bridge have not been tested here. Verify a short recording and both trigger edges on your recording PC.</p><p>USB triggers have variable latency and are <strong>not sample-synchronized</strong> to the audio. The microphone's 200 kHz sampling limits faithful frequency coverage to below 100 kHz.</p></div>
+<p><a href="README.md">Full user guide</a> · <a href="docs/TRIGGERS.md">Trigger wiring &amp; protocol</a> · <a href="docs/VALIDATION.md">Validation notes</a></p>
+</main></html>

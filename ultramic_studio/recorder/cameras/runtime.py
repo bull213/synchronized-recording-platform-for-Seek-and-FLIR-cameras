@@ -100,7 +100,7 @@ class _FlirCameraRecord(TypedDict, total=False):
 
 
 def _seek_candidates() -> Iterator[Path]:
-    """Search application-relative libraries and local transfer bundles."""
+    """Search bundled libraries and optional source-development exports."""
     app = application_folder()
     yield resource_folder() / SEEK_LIBRARY
     yield app / SEEK_LIBRARY

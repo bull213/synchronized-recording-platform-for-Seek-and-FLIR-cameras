@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from camera_demo import DemoCameraCore
-from recording_coordinator import RecordingCoordinator
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.coordinator import RecordingCoordinator
 
 
 def test_shutdown_releases_camera_references_before_sdk_clear():
@@ -74,7 +74,7 @@ def test_window_closes_after_sdk_release_error(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6 import QtWidgets
     from ultramic_studio import gui
-    from unified_gui import UnifiedWindow
+    from ultramic_studio.recorder.ui.window import UnifiedWindow
 
     monkeypatch.setattr(gui, 'list_devices', lambda: [])
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])

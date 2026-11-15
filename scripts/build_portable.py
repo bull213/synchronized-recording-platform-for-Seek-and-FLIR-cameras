@@ -12,12 +12,8 @@ import argparse
 import hashlib
 import json
 import shutil
-import sys
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile, ZIP_DEFLATED
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.package_source import source_files
 
 PYTHON_VERSION = "3.13.16"
 PYTHON_URL = "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip"
@@ -56,9 +52,6 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     source = Path(__file__).resolve().parents[1]
-    approved = source_files(source)
-    if args.output and (args.output.exists() or args.output.resolve().is_relative_to(source)):
-        raise ValueError("Use a new output ZIP path outside the source folder.")
     runtime = source / "runtime"
     if runtime.exists():
         raise RuntimeError("The runtime folder already exists. Build from a clean source copy.")
@@ -87,11 +80,11 @@ def main():
     for path in source.glob("*.cmd"):
         path.write_bytes(path.read_text().replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
     if args.output:
-        generated = [source / "docs" / "PORTABLE_BUILD.json"]
-        generated.extend(path for path in runtime.rglob("*") if path.is_file())
-        with ZipFile(args.output, "x", ZIP_DEFLATED, compresslevel=6) as z:
-            for path in [path for _, path in approved] + sorted(generated):
+        with ZipFile(args.output, "w", ZIP_DEFLATED, compresslevel=6) as z:
+            for path in sorted(source.rglob("*")):
                 relative = path.relative_to(source)
+                if not path.is_file() or any(p.startswith(".") or p == "__pycache__" for p in relative.parts) or path.suffix == ".pyc":
+                    continue
                 z.write(path, Path("UltramicStudio") / relative)
         print(json.dumps({"archive": str(args.output.resolve()), "bytes": args.output.stat().st_size,
                           "sha256": digest(args.output)}))

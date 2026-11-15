@@ -6,27 +6,25 @@ import time
 import numpy as np
 import pytest
 
-from camera_demo import DemoCameraCore
-from recording_coordinator import RecordingCoordinator
-from seek_calibration import get_seek_calibration
-
-pytestmark = pytest.mark.usefixtures('example_calibration')
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.coordinator import RecordingCoordinator
+from ultramic_studio.recorder.cameras.calibration import get_seek_calibration
 
 
 @pytest.mark.parametrize('camera_c,true_c', [
-    (-20, -21.5), (0, 2.5),
-    (25, 32.5), (30, 38.5), (100, 122.5),
+    (-20, -7.043601123498), (0, 7.599400024682),
+    (25, 25.903151459907), (30, 29.563901746952), (100, 80.814405765582),
 ])
-def test_example_calibration_converts_celsius(camera_c, true_c):
-    assert get_seek_calibration('example-calibration').apply(camera_c) == pytest.approx(true_c, abs=1e-10)
+def test_computer_room_converts_celsius(camera_c, true_c):
+    assert get_seek_calibration('11-computer-room').apply(camera_c) == pytest.approx(true_c, abs=1e-10)
 
 
 def test_calibration_handles_pixel_arrays_without_changing_camera_values():
     camera_c = np.array([[-20, 0, 25], [30, 100, np.nan]], dtype=np.float32)
     original = camera_c.copy()
-    actual = get_seek_calibration('example-calibration').apply(camera_c)
-    np.testing.assert_allclose(actual, [[-21.5, 2.5, 32.5],
-                                       [38.5, 122.5, np.nan]], atol=1e-5)
+    actual = get_seek_calibration('11-computer-room').apply(camera_c)
+    np.testing.assert_allclose(actual, [[-7.043601123498, 7.599400024682, 25.903151459907],
+                                       [29.563901746952, 80.814405765582, np.nan]], atol=1e-5)
     np.testing.assert_array_equal(camera_c, original)
     np.testing.assert_array_equal(get_seek_calibration('none').apply(camera_c), original)
     assert get_seek_calibration('none').apply(25.123456) == 25.123456
@@ -53,7 +51,7 @@ def test_each_take_saves_selected_calibration_and_metadata(tmp_path, sample_mode
         controller.apply_shutter('Custom', 1)
     camera_c = np.array([[-20, 0, 25], [30, 100, 20]], dtype=np.float32)
     original = camera_c.copy()
-    selections = ('example-calibration', 'none')
+    selections = ('11-computer-room', 'none')
     try:
         for take_id, name in enumerate(selections, 1):
             controller.configure(seek_calibration=name)
@@ -73,20 +71,20 @@ def test_each_take_saves_selected_calibration_and_metadata(tmp_path, sample_mode
             assert report['status'] == 'complete', report['errors']
             assert report['frame_counts']['seek'] == 1
             assert report['seek_calibration'] == dict(
-                name=name, scale=1.2 if take_id == 1 else 1.0,
-                offset_c=2.5 if take_id == 1 else 0.0, input_units='C', output_units='C')
+                name=name, scale=0.732150057409 if take_id == 1 else 1.0,
+                offset_c=7.599400024682 if take_id == 1 else 0.0, input_units='C', output_units='C')
             assert 'calibration' not in header
             np.testing.assert_array_equal(camera_c, original)
 
         with (controller.run_dir / 'seek_thermal.csv').open(newline='') as handle:
             rows = list(csv.reader(handle))
         assert len(rows) == 6
-        assert 'calibration=example-calibration' in rows[0]
-        assert 'calibration_scale=1.2' in rows[0]
-        assert 'calibration_offset_c=2.5' in rows[0]
+        assert 'calibration=11-computer-room' in rows[0]
+        assert 'calibration_scale=0.732150057409' in rows[0]
+        assert 'calibration_offset_c=7.599400024682' in rows[0]
         assert 'temperature_units=C' in rows[0]
-        assert rows[1] == ['-21.5', '2.5', '32.5', '']
-        assert rows[2] == ['38.5', '122.5', '26.5', '']
+        assert rows[1] == ['-7.0', '7.6', '25.9', '']
+        assert rows[2] == ['29.6', '80.8', '22.2', '']
         assert 'calibration=none' in rows[3]
         assert 'calibration_scale=1.0' in rows[3]
         assert 'calibration_offset_c=0.0' in rows[3]

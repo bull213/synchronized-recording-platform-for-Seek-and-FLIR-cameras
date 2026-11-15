@@ -2,7 +2,7 @@
 
 Start the editable recorder with `Start_Sync_Recorder.cmd`. Existing recording
 modes, acquisition settings, calibration profiles, output formats, and external
-trigger commands are retained. The cage ROI tool uses its original interface.
+trigger commands are retained. The cage ROI tool opens as a secondary window.
 
 ## Everyday recording
 
@@ -38,6 +38,12 @@ trigger commands are retained. The cage ROI tool uses its original interface.
   enlargement remain available. Escape restores the preceding view.
 - Warnings remain visible when settings and diagnostics are hidden. Dismissing
   a notification clears its banner, not the log or the underlying problem.
+- During a cage export, the readiness banner explains why recording is disabled.
+  Completed take results remain visible in Preview mode. Trigger arming and
+  recording status are labelled in text as well as color.
+- The recorder and cage tool follow the system font, have visible keyboard focus,
+  and use a consistent dark palette. The standalone microphone window keeps its
+  existing styling.
 
 Short windows use one row of cameras when sufficient width is available and
 move synchronization details into the result tooltip. Settings and oversized
@@ -45,11 +51,8 @@ views remain scrollable. Status is conveyed in text as well as color.
 
 ## Validation — November 4, 2026
 
-- Prepared public-source suite: **170 passed, 2 expected skips** on Windows
-  with Python 3.12.10, using the existing development environment.
-- Synthetic recording self-test: **passed** (segmented Seek/FLIR video, thermal
-  CSV, PCM WAV, timing reports, and MP3 export).
-- Source inventory: **99 reviewed files**; manifest validation passed.
+- Full local suite before redesign: 156 passed, 2 skipped, 9 failed.
+- Full local suite after redesign: 169 passed, 2 skipped, the same 9 failed.
 - New coverage checks readiness explanations, advanced controls, retained values,
   live audio docking during recording, saved results, and persistent errors.
 - Existing camera-mode, laptop-geometry, audio, and ROI GUI checks pass.
@@ -57,7 +60,9 @@ views remain scrollable. Status is conveyed in text as well as color.
   under `.validation/recorder-redesign`. Separate processes with
   `QT_SCALE_FACTOR=1.25` and `1.5` exercise actual Qt display scaling.
 
-The two skips cover POSIX serial integration and independent MP3 decoding when
-FFmpeg is unavailable. The public repository retains its corrected recording
-fixtures and segmented-output self-test. Physical device acquisition and a new
-Windows executable build were not performed for this redesign.
+The nine pre-existing failures concern the old portable self-test expecting
+unsegmented FLIR files, one other old file-layout expectation, three calibration
+fixtures, three old shutter-stop expectations, and one first-frame fixture.
+They remain unchanged by the presentation work. Synthetic camera/audio capture
+and finalization were exercised; physical device acquisition and a new Windows
+executable build were not performed for this redesign.

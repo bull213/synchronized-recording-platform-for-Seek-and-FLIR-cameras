@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from camera_demo import DemoCameraCore
-from recording_coordinator import RecordingCoordinator
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.coordinator import RecordingCoordinator
 from ultramic_studio.core import AudioBlock, RecordingConfig
 from ultramic_studio.synchronized import SynchronizedAudioEngine
 
@@ -195,7 +195,7 @@ def test_unified_gui_camera_only_and_synchronized_audio_workflow(tmp_path, monke
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6 import QtWidgets
     from ultramic_studio import gui
-    from unified_gui import UnifiedWindow
+    from ultramic_studio.recorder.ui.window import UnifiedWindow
     monkeypatch.setattr(gui, 'list_devices', lambda: [])
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = UnifiedWindow(DemoCameraCore())

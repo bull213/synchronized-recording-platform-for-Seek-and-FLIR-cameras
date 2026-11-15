@@ -1,13 +1,6 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "ULTRAMIC_REQUIREMENTS=requirements.txt"
-if /i "%~1"=="--camera" set "ULTRAMIC_REQUIREMENTS=requirements-camera.txt"
-if /i "%~1"=="--dev" set "ULTRAMIC_REQUIREMENTS=requirements-dev.txt"
-if not "%~1"=="" if /i not "%~1"=="--camera" if /i not "%~1"=="--dev" (
-    echo Usage: Setup_Windows.cmd [--camera ^| --dev]
-    exit /b 1
-)
 echo Ultramic Studio - first-time setup
 echo.
 py -3.12 -c "import sys" >nul 2>&1
@@ -44,11 +37,10 @@ if not exist ".venv\Scripts\python.exe" (
 )
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
 if errorlevel 1 goto failed
-".venv\Scripts\python.exe" -m pip install --only-binary=:all: -r "%ULTRAMIC_REQUIREMENTS%"
+".venv\Scripts\python.exe" -m pip install --only-binary=:all: -r requirements.txt
 if errorlevel 1 goto failed
 echo.
 echo Setup complete. Double-click Start_Ultramic_Studio.cmd to open the app.
-if /i not "%ULTRAMIC_REQUIREMENTS%"=="requirements.txt" echo For the combined synthetic demo, run Demo_Sync_Recorder.cmd.
 pause
 exit /b 0
 

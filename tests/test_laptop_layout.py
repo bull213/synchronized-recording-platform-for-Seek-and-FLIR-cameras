@@ -7,8 +7,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import pytest
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
-from camera_demo import DemoCameraCore
-from unified_gui import UnifiedWindow
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.ui.window import UnifiedWindow
 
 
 def pump(app, check=lambda: True, seconds=10):
@@ -22,7 +22,7 @@ def pump(app, check=lambda: True, seconds=10):
 
 
 @pytest.fixture
-def window(tmp_path, monkeypatch, example_calibration):
+def window(tmp_path, monkeypatch):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     # Windows' offscreen plugin does not discover system fonts itself.
     if os.name == 'nt':
@@ -170,9 +170,9 @@ def test_preview_reflow_keeps_the_same_live_widgets(window):
 def test_calibration_selector_is_locked_for_armed_and_active_takes(window):
     app, win = window
     assert win.calibration.currentData() == 'none'
-    win.calibration.setCurrentIndex(win.calibration.findData('example-calibration'))
-    assert win.controller.options['seek_calibration'] == 'example-calibration'
-    assert win.settings.value('seek/calibration') == 'example-calibration'
+    win.calibration.setCurrentIndex(win.calibration.findData('11-computer-room'))
+    assert win.controller.options['seek_calibration'] == '11-computer-room'
+    assert win.settings.value('seek/calibration') == '11-computer-room'
     win.record_mode.setCurrentIndex(2)
     assert not win.calibration.isEnabled()
     win.record_mode.setCurrentIndex(0)
@@ -183,7 +183,7 @@ def test_calibration_selector_is_locked_for_armed_and_active_takes(window):
     win.command('START')
     pump(app, lambda: win.controller.state == 'recording')
     assert not win.calibration.isEnabled()
-    assert win.controller.take['seek_calibration']['name'] == 'example-calibration'
+    assert win.controller.take['seek_calibration']['name'] == '11-computer-room'
     pump(app, lambda: all(win.controller.take['frame_counts'].get(name, 0)
                          for name in ('seek', 'flir_cam0', 'flir_cam1')))
     win.command('STOP')
@@ -197,11 +197,11 @@ def test_calibration_selector_is_locked_for_armed_and_active_takes(window):
 
 
 @pytest.mark.parametrize('saved_name,expected_name', [
-    ('example-calibration', 'example-calibration'), ('removed-room', 'none'),
+    ('11-computer-room', '11-computer-room'), ('removed-room', 'none'),
 ])
 def test_calibration_preference_restored_with_unknown_room_fallback(window, saved_name, expected_name):
     app, win = window
-    win.calibration.setCurrentIndex(win.calibration.findData('example-calibration'))
+    win.calibration.setCurrentIndex(win.calibration.findData('11-computer-room'))
     if saved_name == 'removed-room':
         win.settings.setValue('seek/calibration', saved_name)
     win.close()

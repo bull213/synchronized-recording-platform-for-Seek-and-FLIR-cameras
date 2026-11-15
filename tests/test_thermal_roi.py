@@ -37,7 +37,7 @@ def cages():
             {'mouse_id': 'WT_02', 'genotype': 'WT', 'roi': [4, 0, 4, 6]}]
 
 
-def test_export_exact_pixels_metrics_and_timing(tmp_path):
+def test_export_exact_pixels_metrics_timing_and_analysis_compatibility(tmp_path):
     root = tmp_path / 'source'
     arrays = recording(root, 260, nonfinite=True)
     before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir()}
@@ -70,6 +70,9 @@ def test_export_exact_pixels_metrics_and_timing(tmp_path):
             else:
                 assert np.isnan(table.temperature_c[i]) and table.quality[i] == 'nonfinite_pixels'
         assert table.timestamp_utc_iso.iloc[0].endswith('.000000001Z')
+        from mouse_thermal_circadian_figures import load_mouse, build_parser
+        loaded = load_mouse(out / cage['mouse_id'] / 'temperature_timeseries.csv', build_parser().parse_args([]))
+        assert len(loaded) == table.temperature_c.notna().sum()
     assert before == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir()}
 
 

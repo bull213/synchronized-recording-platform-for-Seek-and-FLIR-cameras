@@ -6,9 +6,9 @@ import time
 import numpy as np
 import pytest
 
-from camera_demo import DemoCameraCore
-from camera_runtime import SeekShutterFrameGate
-from recording_coordinator import RecordingCoordinator
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.cameras.runtime import SeekShutterFrameGate
+from ultramic_studio.recorder.coordinator import RecordingCoordinator
 
 
 def wait_for(check, timeout=5):
@@ -142,7 +142,6 @@ def test_selected_frame_sets_shared_start_and_saves_metadata(tmp_path):
 @pytest.mark.parametrize('failure', ['sdk', 'timeout', 'disconnect'])
 def test_capture_failure_requests_recovery_and_preserves_other_streams(tmp_path, monkeypatch, failure):
     core, controller = controller_for_test(tmp_path)
-    # Drive the watchdog deterministically; no background recovery or hardware.
     monkeypatch.setattr(controller, '_ensure_monitor', lambda: None)
     controller.flir_cams = [dict(index=0, serial='DEMO', cam=None)]
     recovered = threading.Event()
@@ -192,7 +191,7 @@ def test_demo_gui_after_shutter_recording(tmp_path, monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6 import QtWidgets
     from ultramic_studio import gui
-    from unified_gui import UnifiedWindow
+    from ultramic_studio.recorder.ui.window import UnifiedWindow
     monkeypatch.setattr(gui, 'list_devices', lambda: [])
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = UnifiedWindow(DemoCameraCore())

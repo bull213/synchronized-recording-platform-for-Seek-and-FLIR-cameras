@@ -14,9 +14,8 @@ after finalization to continue recording cameras.
 2. The earliest fresh Seek callback with valid thermal pixels and metadata at
    or after the request sets `shared_start_monotonic_ns`, called T0. A small
    recent-frame buffer covers the interval while the GUI reads its controls.
-   An older cached frame cannot establish the start. If Seek is unavailable, the
-   take remains pending while the watchdog reports recovery attempts; STOP cancels
-   a take that has not established T0. Other streams cannot establish T0 in this mode.
+   An older cached frame cannot establish the start. No valid Seek frame within
+   the startup timeout produces an error rather than starting another stream alone.
 3. Seek saves this frame even in custom-rate mode. Custom sampling then chooses
    fresh callbacks on the requested schedule; every-frame mode saves each callback.
 4. FLIRs run continuously. Frames received before T0 are excluded; each first
@@ -75,18 +74,16 @@ session_YYYYMMDD_HHMMSS/
   take01_events.jsonl
   take02_sync.json
   take02_events.jsonl
+  flir_cam0.mp4
+  flir_cam0_take02.mp4
+  flir_cam1.mp4
+  flir_cam1_take02.mp4
   flir_log_cam0.csv
   flir_log_cam1.csv
   seek_log.csv
   seek_thermal.csv
-  video_parts/
-    seek_take01_part0001.mp4
-    seek_take01_part0001.csv
-    flir_cam0_take01_part0001.mp4
-    flir_cam0_take01_part0001.csv
-    flir_cam1_take01_part0001.mp4
-    flir_cam1_take01_part0001.csv
-    ...                              # more parts / takes as needed
+  seek_custom/s00000.png ...
+  seek_frames/s00001.png ...
   microphone/
     take01/
       audio_0001.wav
@@ -100,27 +97,11 @@ session_YYYYMMDD_HHMMSS/
     take02/ ...
 ```
 
-Camera videos are segmented at 15 minutes by default, and also across camera
-reconnection, shape changes, or frame-ID resets. Seek color frames are MP4 previews;
-thermal pixel values remain in `seek_thermal.csv`. No individual PNG frames are
-saved. The take report's `segments` map identifies files, stream names, frame counts,
-timing CSVs, connection generations, and finalization status. An in-progress part
-uses a `.partial.mp4` suffix until verification and finalization succeed.
-
-FLIR preview videos use 30 fps; Seek preview fps follows the selected sampling
-mode. Use CSVs for actual receipt timing rather than inferring timing from playback.
-Logs map frames to their video part and index. The metadata schema remains version 2.
-
-In **After shutter request** mode, one valid frame received after a successful
-shutter SDK call is selected per request. Request/return/frame timestamps are
-recorded; this does not prove when the physical shutter reopened. Custom shutter
-mode must be applied first. SDK failures or selection timeouts raise warnings and
-can trigger recovery; they do not by themselves stop the entire take.
-
-**FLIR only** places segmented MP4s directly in the session folder and omits
-timing/thermal files. **Microphone only** produces normal-speed MP3; failed conversion
-retains recoverable temporary WAV. Changing between independent and combined
-recording modes starts a separate session folder.
+Only the selected Seek sampling folder is used for a take. Seek filenames and
+CSV counters increase across the session; `seek_log.csv` maps each file to its
+take. FLIR logs retain the original first four columns and add take ID, host
+receipt time, offset from Seek, and timestamp source. Videos use the original
+30 fps playback rate; use CSVs for acquisition timing and detected frame-ID gaps.
 
 There is **no `microphone/` output for camera-only takes**. The main audio WAVs
 are contiguous PCM segments starting at file sample zero for the shared take.
@@ -134,9 +115,7 @@ Automatic MP3 export includes the main segments, excluding `pretrigger.wav`.
 1. Open `takeNN_sync.json`. Require `status: "complete"`, an empty `errors`
    array, a non-null T0, and an entry for Seek and every expected FLIR.
 2. Seek's first offset should be zero. Inspect each FLIR's actual
-   `offset_from_seek_ns`; do not assume it is zero. Check received, written, and
-   dropped frame counts, `has_gaps`, `gaps`, `recovery_counts`, and every segment's
-   status. A `complete_with_gaps` take needs review before analysis.
+   `offset_from_seek_ns`; do not assume it is zero. Check frame counts and gaps.
 3. For an audio take, require `audio_status: "complete"`, positive `audio_samples`,
    and a microphone entry. Read its `timestamp_source` before interpreting its
    small estimated offset. For camera-only, expect `audio_status: "disabled"`.
@@ -149,22 +128,20 @@ Automatic MP3 export includes the main segments, excluding `pretrigger.wav`.
 6. To verify physical timing, perform a connected-camera bench measurement
    using the common reference, including a representative-duration drift check.
 
-Camera faults are reported per stream and trigger reconnection attempts while
-other streams continue. Stale frames from previous connection generations are
-rejected. Queue pressure records dropped frames and gaps. STOP cancels recovery
-and finalizes retained data. Missing streams, audio capture/continuity failures,
-and detected storage errors can mark the take incomplete or stop it.
-Camera disk space is checked periodically; less than 1 GiB stops recording and
-less than 10 GiB produces a warning.
+Output initialization, bounded-queue overflow, audio continuity/capture failure,
+camera disconnection, and detected disk errors stop or flag incomplete takes.
+Camera disk space is checked periodically; less than 100 MB stops recording.
 The app finishes queued recording/export work during close. Recovery after a
 power failure or an unreported driver loss is not guaranteed.
 
 ## Implementation map
 
-`ultramic_studio/recorder/cameras/capture.py` acquires cameras and stamps frame receipt times.
+`ultramic_studio/recorder/cameras/capture.py` acquires the real cameras and stamps frame receipt times.
 `ultramic_studio/recorder/coordinator.py` owns the shared take state and reference clock.
 `ultramic_studio/recorder/storage.py` writes camera outputs separately from callbacks.
 `ultramic_studio/synchronized.py` adds timestamp-targeted sample selection to
 the standalone recorder engine. `ultramic_studio/recorder/ui/window.py` reuses the standalone Qt
 spectrogram, review, and export UI. `ultramic_studio/recorder/cameras/demo.py` supplies labelled synthetic
 cameras for tests and demos without loading the camera SDKs.
+
+See [Project structure](PROJECT_STRUCTURE.md) for the complete package layout and entry points.

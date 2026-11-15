@@ -6,7 +6,7 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-".venv\Scripts\python.exe" -m pip install "pyinstaller==6.22.3"
+".venv\Scripts\python.exe" -m pip install "pyinstaller>=6,<7"
 if errorlevel 1 goto failed
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --onedir --windowed --name UltramicStudio --collect-all sounddevice --collect-all lameenc --collect-data pyqtgraph launch.py
 if errorlevel 1 goto failed

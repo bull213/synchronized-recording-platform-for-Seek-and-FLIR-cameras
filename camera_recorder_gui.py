@@ -1,6 +1,4 @@
-"""Compatibility alias; implementation lives in the recorder package."""
-import importlib
-import sys
+"""Compatibility entrypoint for the unified Qt recorder interface."""
+from ultramic_studio.recorder.ui.window import RecorderApp, UnifiedWindow
 
-_module = importlib.import_module('ultramic_studio.recorder.ui.window')
-sys.modules[__name__] = _module
+__all__ = ['RecorderApp', 'UnifiedWindow']

@@ -15,8 +15,8 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6 import QtCore, QtGui, QtWidgets
-from camera_demo import DemoCameraCore
-from unified_gui import UnifiedWindow
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.ui.window import UnifiedWindow
 
 
 def main():

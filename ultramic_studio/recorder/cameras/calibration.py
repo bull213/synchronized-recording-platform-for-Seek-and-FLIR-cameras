@@ -24,6 +24,8 @@ class SeekCalibration:
 
 SEEK_CALIBRATIONS = {
     'none': SeekCalibration('none', 'None (camera temperature)'),
+    '11-computer-room': SeekCalibration('11-computer-room', '11-computer-room',
+                                       0.732150057409, 7.599400024682),
 }
 
 

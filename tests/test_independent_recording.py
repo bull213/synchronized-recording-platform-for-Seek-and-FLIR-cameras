@@ -1,15 +1,14 @@
 import os
-import runpy
+import importlib
 import time
 import wave
-from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
 
-from camera_demo import DemoCameraCore
-from recording_coordinator import RecordingCoordinator
+from ultramic_studio.recorder.cameras.demo import DemoCameraCore
+from ultramic_studio.recorder.coordinator import RecordingCoordinator
 from ultramic_studio.audio import DemoSource
 from ultramic_studio.core import RecordingConfig
 from ultramic_studio.export import export_mp3
@@ -103,7 +102,7 @@ def test_flir_only_without_seek_saves_only_playable_mp4s(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('fail_export', [False, True])
 def test_microphone_only_without_cameras_and_export_recovery(tmp_path, monkeypatch, fail_export):
-    import recording_coordinator
+    from ultramic_studio.recorder import coordinator as recording_coordinator
     core = DemoCameraCore()
     controller = RecordingCoordinator(core)
     controller.configure(output=str(tmp_path), recording_mode='microphone_mp3')
@@ -166,11 +165,11 @@ def test_normal_speed_mp3_duration_and_no_sidecar(tmp_path):
 
 
 def test_camera_module_import_does_not_require_camera_sdks(monkeypatch):
-    import camera_runtime
+    from ultramic_studio.recorder.cameras import runtime as camera_runtime
     def fail():
         raise AssertionError('Seek SDK must load only when connecting')
     monkeypatch.setattr(camera_runtime, 'find_seek_dll', fail)
-    from ultramic_studio.recorder.cameras import capture
+    capture = importlib.import_module('ultramic_studio.recorder.cameras.capture')
     assert capture.seek is None
     assert capture.PySpin is None
 
@@ -179,7 +178,7 @@ def test_gui_modes_and_draggable_preview_panels(tmp_path, monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6 import QtCore, QtTest, QtWidgets
     from ultramic_studio import gui
-    from unified_gui import UnifiedWindow
+    from ultramic_studio.recorder.ui.window import UnifiedWindow
     monkeypatch.setattr(gui, 'list_devices', lambda: [])
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = UnifiedWindow(DemoCameraCore())

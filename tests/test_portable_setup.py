@@ -3,8 +3,8 @@ import sys
 
 import pytest
 
-import camera_runtime
-from recorder_setup import self_test
+from ultramic_studio.recorder.cameras import runtime as camera_runtime
+from ultramic_studio.recorder.diagnostics import self_test
 
 
 def test_frozen_seek_sdk_is_found_in_moved_bundle(tmp_path, monkeypatch):

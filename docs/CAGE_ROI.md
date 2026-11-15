@@ -1,21 +1,23 @@
 # Cage ROI thermal exporter
 
-In the combined recorder, choose **View → Cage ROI export…** to open the tool
-in a separate window. A finished current session is offered automatically; use
-**Open recording…** to choose another. You can also run **Setup_Windows.cmd --camera**
-once, then double-click **Start_Cage_ROI.cmd** in the source project.
+In the camera recorder, choose **View → Cage ROI export…** to open the tool in a
+separate window. A finished current session is offered automatically; use **Open
+recording…** to choose another. The standalone **Start_Cage_ROI.cmd** launcher
+also remains available in the source project.
 
 1. Open a **finished recording folder** containing `seek_thermal.csv` and
    `seek_log.csv`. The native thermal image appears immediately after the log is read.
-2. Click **Add cage** and drag around one cage, or enter native pixel coordinates
-   and choose **Apply coordinates**. Repeat for the other cage.
+2. Click **Add cage** and drag around one cage. Repeat for the other cage.
    Defaults are `WT_01`, `WT_02`, etc. Use **Rename / genotype** for other labels.
 3. Click a rectangle to select it. Drag inside to move it, drag a corner to resize,
-   edit its coordinates, or choose **Redraw selected**. Cage rectangles cannot overlap.
+   or choose **Redraw selected**. For keyboard entry, select a cage, enter native
+   pixel **X**, **Y**, **Width**, and **Height**, then choose **Apply coordinates**.
+   To create a cage without drawing, choose **Add cage** and apply its coordinates.
+   Cage rectangles cannot overlap; valid edits require reviewing the boundaries again.
 4. Use the time slider and **Preview selected time** to inspect cage positions
    later in the recording. This follows the log's video segment and frame index;
-   playback seconds are not used as acquisition timestamps. Thermal export uses
-   native pixels. **Native thermal frame** loads the calibrated thermal image at
+   playback seconds are not used as acquisition timestamps. Export always uses
+   thermal pixels. **Native thermal frame** loads the calibrated thermal image at
    the slider position. The first jump forward scans frame offsets in the large
    source file; those offsets are cached for faster subsequent visits during the session.
    The cage thumbnail shows the entire ROI scaled down while preserving its shape;
@@ -24,13 +26,15 @@ once, then double-click **Start_Cage_ROI.cmd** in the source project.
 5. Check **Cage boundaries checked for this recording**. Optionally save the
    selections for reuse. Loading selections requires reviewing them again;
    configurations with a different thermal resolution are rejected.
-6. Choose whether to export cropped Seek video, click **Export pixels + temperatures**,
+6. Choose whether to **Export cropped Seek video**, click **Export pixels + temperatures**,
    then choose a destination parent folder. Video is selected by default in the recorder.
    Each export creates a new run folder and processes all frames and takes.
 
-Finish the current take and disarm triggers before exporting. The recorder blocks
-starting or arming a recording until export completes or is cancelled. The
-standalone tool does not coordinate with a separate recorder process.
+Finish the current take and disarm triggers before starting a cage export. While
+the export runs, starting or arming a recording is blocked. Opening and reviewing
+the tool remains available during capture. Closing the recorder cancels an active
+export and waits for its worker to finish safely. The standalone launcher runs
+independently and does not coordinate with another recorder process.
 
 The banner above Export states whether the export has started. If it says
 **Export not running**, follow its instruction (usually check the cage-boundary
@@ -46,13 +50,6 @@ the maximum is a surface-temperature proxy, not a measurement of core temperatur
 
 ## Files and measurements
 
-When video export is selected, each cage gets cropped Seek MP4 parts and a frame
-map with source frame identifiers and timestamps. Source take and part boundaries
-and playback rates are preserved; acquisition times come from the frame map.
-Odd-sized crops are padded on the bottom or right for encoding; the thermal arrays
-retain exact ROI dimensions. The videos are re-encoded visual references. Audio and
-FLIR videos are not split.
-
 Each mouse folder contains `pixels/part_000001.npz`, etc., and
 `temperature_timeseries.csv`. At most 256 frames go into a pixel archive; the
 chunk size is reduced for large selections to keep combined crop buffers within
@@ -67,7 +64,16 @@ Load them using `numpy.load(path, allow_pickle=False)`; no pickle is required.
 Each chunk is read back and every array (including IDs and calibration indices)
 is checked before it is published. Standard NPZ/DEFLATE level 1 prioritizes export
 speed over the smallest possible files. This does not change stored values or
-require a different reader.
+require a different reader. See [performance measurements](ROI_PERFORMANCE.md).
+
+When video export is enabled, each cage also has `video_parts/` with cropped Seek
+MP4s matching the source take and part boundaries, plus `video_frame_map.csv`
+linking each output frame to the source frame index and exact acquisition times.
+The videos retain the source playback rate; that rate is not an acquisition
+timestamp. Odd-width or odd-height crops are padded by one pixel at the right or
+bottom for the video encoder. Thermal arrays keep the exact selected dimensions.
+FLIR videos and microphone audio are not split by this tool. Video is re-encoded
+and is intended for visual review; use the thermal arrays for analysis.
 
 The summary CSV includes the same frame IDs and exact integer timestamps, a
 nanosecond UTC ISO string, mouse/genotype labels, ROI maximum and mean,
@@ -98,7 +104,7 @@ files change during extraction. Export disk errors retain an incomplete manifest
 
 Use `thermal_roi.make_config(recording, shape, cages)` and
 `thermal_roi.export_rois(recording, config, output_parent, include_video=True)`
-to include video; the default remains thermal-only. A saved configuration
+to include cropped videos. The default is thermal-only for compatibility. A saved configuration
 can be loaded with `thermal_roi.load_config`; a different source must be reviewed
 and a new configuration made before extraction. The optional `max_frames` argument
 is for validation samples and records `scope=sample` in the manifest. The GUI

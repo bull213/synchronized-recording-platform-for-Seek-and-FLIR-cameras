@@ -19,22 +19,32 @@ from zipfile import ZipFile, ZIP_DEFLATED
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE))
 from ultramic_studio.recorder.cameras.runtime import find_seek_dll
-from scripts.package_source import source_files
 
 PACKAGES = ('numpy', 'opencv-python', 'PySide6', 'shiboken6', 'pyqtgraph',
             'sounddevice', 'pyserial', 'lameenc', 'spinnaker-python', 'pyinstaller')
+APP_FILES = ('launch_sync.py', 'sync-rec.py', 'camera_recorder_gui.py',
+             'thermal_roi.py', 'thermal_roi_gui.py', 'thermal_roi_storage.py', 'thermal_roi_video.py', 'Start_Cage_ROI.cmd',
+             'requirements.txt', 'requirements-camera.txt',
+             'requirements-export.txt', 'Export_Sync_Recorder.cmd', 'Start_Sync_Recorder.cmd',
+             'Setup_New_PC.cmd', 'Install_Camera_Drivers.cmd', 'Demo_Sync_Recorder.cmd',
+             'START_SYNC_HERE.html', 'README.md', 'Start_Sync_Recorder.ps1',
+             'Create_Desktop_Shortcut.ps1', 'Create_Desktop_Shortcut.cmd')
 VC_RUNTIMES = {'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
                'vcruntime140.dll', 'vcruntime140_1.dll', 'vcomp140.dll'}
 
 
 def copy_editable_source(destination, source=SOURCE):
-    """Copy only files in the reviewed source inventory."""
+    """Export the complete application package without local/generated files."""
     destination = Path(destination)
     destination.mkdir()
-    for name, path in source_files(source):
-        target = destination / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
+    for name in APP_FILES:
+        shutil.copy2(source / name, destination / name)
+    for name in ('ultramic_studio', 'docs'):
+        shutil.copytree(source / name, destination / name,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    (destination / 'scripts').mkdir()
+    for name in ('build_sync_portable.py', 'sync_runtime_hook.py'):
+        shutil.copy2(source / 'scripts' / name, destination / 'scripts' / name)
 
 
 def digest(path):
@@ -95,7 +105,6 @@ def main():
                         default=Path(r'C:\Program Files\Teledyne\Spinnaker\driver64\PGRUsb3'),
                         help='Folder containing the installed vendor FLIR USB3 driver')
     args = parser.parse_args()
-    approved = source_files(SOURCE)
     if platform.system() != 'Windows' or struct.calcsize('P') != 8:
         raise RuntimeError('Build on Windows x64, using the configured camera Python environment.')
     import PySpin  # Verify that the matching vendor package is installed.
@@ -160,11 +169,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name='SyncRecorder', strip=False, upx=F
                  'Demo_Sync_Recorder.cmd', 'START_SYNC_HERE.html', 'README.md',
                  'Start_Sync_Recorder.ps1', 'Create_Desktop_Shortcut.ps1', 'Create_Desktop_Shortcut.cmd'):
         shutil.copy2(SOURCE / name, folder / name)
-    for name, path in approved:
-        if name.startswith('docs/') or name == 'LICENSE':
-            target = folder / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+    shutil.copytree(SOURCE / 'docs', folder / 'docs', ignore=shutil.ignore_patterns('__pycache__'))
     shutil.copytree(seek_driver, folder / 'drivers' / 'Seek')
     shutil.copytree(args.flir_driver, folder / 'drivers' / 'FLIR_USB3')
     copy_editable_source(folder / 'source')
