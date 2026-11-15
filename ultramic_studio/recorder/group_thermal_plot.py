@@ -87,6 +87,21 @@ def parse_time_str(val: str | dt_time | int | float) -> dt_time:
     return dt_time(7, 0)
 
 
+def _extract_hotspot(frame: np.ndarray, lower: float, upper: float, roi_size: int) -> float:
+    """Extract mean temperature of a square patch centered on the hottest valid pixel."""
+    valid = np.isfinite(frame) & (frame >= lower) & (frame <= upper)
+    if not valid.any():
+        return float('nan')
+    height, width = frame.shape[:2]
+    cy, cx = np.unravel_index(np.where(valid, frame, -np.inf).argmax(), frame.shape)
+    side = min(roi_size, height, width)
+    y0 = min(max(cy - side // 2, 0), height - side)
+    x0 = min(max(cx - side // 2, 0), width - side)
+    patch = frame[y0:y0 + side, x0:x0 + side]
+    patch = patch[np.isfinite(patch) & (patch >= lower) & (patch <= upper)]
+    return float(patch.mean()) if patch.size else float('nan')
+
+
 def _load_legacy_seek_frames(path: Path, config=DEFAULT_PLOT_SETTINGS) -> pd.DataFrame:
     """Parse legacy Seek stacked raw 2D pixel CSV format if encountered."""
     header_re = re.compile(rb'(?:^|[,|])\s*(width|height|timestamp_utc_ns|temperature_units)\s*=\s*([^,|\r\n]+)')
@@ -114,17 +129,7 @@ def _load_legacy_seek_frames(path: Path, config=DEFAULT_PLOT_SETTINGS) -> pd.Dat
             if units is None:
                 scale, offset = config.get('LEGACY_CALIBRATION', (0.84247, 4.7243))
                 frame = scale * frame + offset
-            valid = np.isfinite(frame) & (frame >= lower) & (frame <= upper)
-            if not valid.any():
-                val = float('nan')
-            else:
-                cy, cx = np.unravel_index(np.where(valid, frame, -np.inf).argmax(), frame.shape)
-                side = min(roi_size, height, width)
-                y0 = min(max(cy - side // 2, 0), height - side)
-                x0 = min(max(cx - side // 2, 0), width - side)
-                patch = frame[y0:y0 + side, x0:x0 + side]
-                patch = patch[np.isfinite(patch) & (patch >= lower) & (patch <= upper)]
-                val = float(patch.mean()) if patch.size else float('nan')
+            val = _extract_hotspot(frame, lower, upper, roi_size)
             timestamps.append(stamp)
             temperatures.append(val)
 
@@ -137,16 +142,90 @@ def _load_legacy_seek_frames(path: Path, config=DEFAULT_PLOT_SETTINGS) -> pd.Dat
     })
 
 
+def _resolve_npz_files(path: Path | str) -> list[Path]:
+    """Find all matching .npz chunks for a given file or directory path."""
+    p = Path(path)
+    if p.is_dir():
+        pixels_dir = p / 'pixels'
+        target_dir = pixels_dir if pixels_dir.is_dir() else p
+        chunks = sorted(target_dir.glob('part_*.npz'))
+        if not chunks:
+            chunks = sorted(target_dir.glob('*.npz'))
+        return chunks
+    if p.is_file() and p.suffix.lower() == '.npz':
+        if p.name.startswith('part_'):
+            chunks = sorted(p.parent.glob('part_*.npz'))
+            if chunks:
+                return chunks
+        return [p]
+    return []
+
+
+def _load_npz_frames(path: Path | str, config=DEFAULT_PLOT_SETTINGS) -> pd.DataFrame:
+    """Load temperature timeseries from .npz chunk archives."""
+    chunks = _resolve_npz_files(path)
+    if not chunks:
+        raise FileNotFoundError(f'No .npz files found in {path}')
+
+    p = Path(path)
+    if p.is_dir():
+        mouse_id = p.parent.name if p.name == 'pixels' else p.name
+    elif p.parent.name == 'pixels':
+        mouse_id = p.parent.parent.name
+    else:
+        mouse_id = p.stem
+
+    lower, upper = config.get('VALID_TEMPERATURE_C', (-15.0, 65.0))
+    roi_size = int(config.get('ROI_SIZE_PIXELS', 7))
+
+    timestamps, temperatures = [], []
+    for chunk_path in chunks:
+        with np.load(chunk_path, allow_pickle=False) as data:
+            pixels = data['pixels']
+            ts = data['timestamp_utc_ns']
+            n_frames = len(pixels)
+            for i in range(n_frames):
+                frame = pixels[i]
+                val = _extract_hotspot(frame, lower, upper, roi_size)
+                timestamps.append(int(ts[i]))
+                temperatures.append(val)
+
+    if not timestamps:
+        raise ValueError(f'{path}: No thermal frames found in .npz archive(s).')
+
+    stamps_arr = np.asarray(timestamps, dtype=np.int64)
+    dt_utc = pd.to_datetime(stamps_arr, unit='ns', utc=True)
+    df = pd.DataFrame({
+        'datetime_utc': dt_utc,
+        'temperature_c': np.asarray(temperatures, dtype=float),
+        'mouse_id': mouse_id,
+    })
+    return df.sort_values('datetime_utc').drop_duplicates('datetime_utc').reset_index(drop=True)
+
+
 def load_mouse_csv(path: Path | str, config=DEFAULT_PLOT_SETTINGS) -> pd.DataFrame:
-    """Load a 1-mouse CSV file, autodetecting timestamp and temperature columns.
+    """Load a 1-mouse CSV or NPZ file/directory, autodetecting timestamp and temperature columns.
 
     Supports:
+      - Cage ROI .npz chunks (single chunk, all parts, or mouse directory)
       - Cage ROI timeseries: timestamp_utc_iso / timestamp_utc_ns, roi_max_c / temperature_c
       - Dravet frame max / full frame max: timestamp_utc_iso, temperature_c
       - Generic single-mouse CSVs with timestamp and temperature columns
       - Legacy stacked seek frames
     """
     path = Path(path)
+    if path.is_dir() or path.suffix.lower() == '.npz':
+        if path.is_dir() and path.name != 'pixels' and (path / 'temperature_timeseries.csv').is_file():
+            return load_mouse_csv(path / 'temperature_timeseries.csv', config)
+        npz_files = _resolve_npz_files(path)
+        if npz_files:
+            return _load_npz_frames(path, config)
+        if path.is_dir():
+            ts_csv = path / 'temperature_timeseries.csv'
+            if ts_csv.is_file():
+                return load_mouse_csv(ts_csv, config)
+        raise FileNotFoundError(f'No usable thermal files found in: {path}')
+
     if not path.is_file():
         raise FileNotFoundError(f'File not found: {path}')
 
@@ -209,6 +288,9 @@ def load_mouse_csv(path: Path | str, config=DEFAULT_PLOT_SETTINGS) -> pd.DataFra
     })
     result = result.sort_values('datetime_utc').reset_index(drop=True)
     return result
+
+
+load_mouse_data = load_mouse_csv
 
 
 def _read_trace(path: Path, config=DEFAULT_PLOT_SETTINGS) -> MouseTrace:

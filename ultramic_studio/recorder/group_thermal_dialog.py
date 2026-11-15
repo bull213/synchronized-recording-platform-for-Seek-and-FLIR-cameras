@@ -17,12 +17,14 @@ class GroupThermalPlotDialog(W.QDialog):
 
     def __init__(self, parent, preferences, initial_dir):
         super().__init__(parent)
-        self.preferences = preferences
+        self.preferences = preferences or QtCore.QSettings('UltramicStudio', 'GroupThermalPlot')
         self.result_data = None
+        self._last_imported_roi_folder = None
+        self._last_imported_cages = []
         self.setWindowTitle('Multi-mouse thermal plot settings')
-        self.setMinimumWidth(720)
+        self.setMinimumWidth(760)
 
-        saved = preferences.value(self.SETTINGS_KEY, '', type=str)
+        saved = self.preferences.value(self.SETTINGS_KEY, '', type=str)
         try:
             data = json.loads(saved) if saved else {}
         except (TypeError, json.JSONDecodeError):
@@ -38,39 +40,64 @@ class GroupThermalPlotDialog(W.QDialog):
         # File location header
         form = W.QFormLayout()
         layout.addLayout(form)
-        form.addRow('Default CSV folder', self._directory_row(self.input_dir, 'Select default CSV folder'))
+        form.addRow('Default data folder', self._directory_row(self.input_dir, 'Select default data folder'))
+
+        # Data mode selector
+        mode_box = W.QHBoxLayout()
+        mode_label = W.QLabel('Data source:')
+        mode_label.setStyleSheet('font-weight: bold;')
+        self.mode_timeseries = W.QRadioButton('Pre-extracted timeseries (temperature_timeseries.csv — 1 file per mouse, instant)')
+        self.mode_pixels = W.QRadioButton('Raw pixel chunks (pixels/part_*.npz — custom hotspot extraction)')
+        self.mode_timeseries.setChecked(True)
+        mode_box.addWidget(mode_label)
+        mode_box.addWidget(self.mode_timeseries)
+        mode_box.addWidget(self.mode_pixels)
+        mode_box.addStretch(1)
+        layout.addLayout(mode_box)
 
         # Group table
-        table_label = W.QLabel('Groups and single-mouse CSV files:')
+        table_label = W.QLabel('Groups and single-mouse thermal files (CSV or NPZ):')
         table_label.setStyleSheet('font-weight: bold; margin-top: 6px;')
         layout.addWidget(table_label)
 
         self.table = W.QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(['Group / genotype', 'CSV files (1 mouse per file; separate with ;)'])
+        self.table.setHorizontalHeaderLabels(['Group / genotype', 'Thermal files / folders (1 mouse per entry; separate with ;)'])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(0, 160)
         self.table.setMinimumHeight(150)
         layout.addWidget(self.table)
 
         group_buttons = W.QHBoxLayout()
+        import_roi = W.QPushButton('Import Cage ROI export…')
+        import_roi.setStyleSheet('font-weight: bold; background-color: #243447; color: #4c9aff; padding: 4px 10px;')
         add_group = W.QPushButton('Add group')
         remove_group = W.QPushButton('Remove selected group')
-        add_files = W.QPushButton('Choose CSVs for selected group…')
+        add_files = W.QPushButton('Choose files for group…')
+        add_folder = W.QPushButton('Choose mouse folder…')
+        group_buttons.addWidget(import_roi)
         group_buttons.addWidget(add_group)
         group_buttons.addWidget(remove_group)
         group_buttons.addWidget(add_files)
+        group_buttons.addWidget(add_folder)
         group_buttons.addStretch(1)
         layout.addLayout(group_buttons)
 
+        import_roi.clicked.connect(lambda: self.import_cage_roi_folder())
         add_group.clicked.connect(lambda: self._add_group())
         remove_group.clicked.connect(self._remove_group)
         add_files.clicked.connect(self._choose_files)
+        add_folder.clicked.connect(self._choose_folder)
+        self.mode_timeseries.toggled.connect(self._update_table_from_cages)
 
-        for name, files in self.groups.items():
-            self._add_group(name, files)
-        if self.table.rowCount() == 0:
-            self._add_group('WT')
-            self._add_group('Dravet')
+        init_path = Path(initial_dir) if initial_dir else None
+        if init_path and ((init_path / 'roi_config.json').is_file() or (init_path / 'manifest.json').is_file()):
+            self.import_cage_roi_folder(init_path)
+        else:
+            for name, files in self.groups.items():
+                self._add_group(name, files)
+            if self.table.rowCount() == 0:
+                self._add_group('WT')
+                self._add_group('Dravet')
 
         # Analysis options
         options_label = W.QLabel('Analysis and lighting parameters:')
@@ -182,11 +209,12 @@ class GroupThermalPlotDialog(W.QDialog):
     def _choose_files(self):
         row = self.table.currentRow()
         if row < 0:
-            W.QMessageBox.information(self, 'Choose CSVs', 'Select a group row first.')
+            W.QMessageBox.information(self, 'Choose files', 'Select a group row first.')
             return
         start_folder = self.input_dir.text() or str(Path.cwd())
         paths, _ = W.QFileDialog.getOpenFileNames(
-            self, 'Select one or more single-mouse thermal CSV files', start_folder, 'CSV files (*.csv)')
+            self, 'Select one or more single-mouse thermal files', start_folder,
+            'Thermal files (*.csv *.npz);;NumPy archives (*.npz);;CSV files (*.csv);;All files (*.*)')
         if not paths:
             return
 
@@ -202,6 +230,93 @@ class GroupThermalPlotDialog(W.QDialog):
                 stored.append(str(p_res))
 
         self.table.item(row, 1).setText('; '.join(stored))
+
+    def _choose_folder(self):
+        row = self.table.currentRow()
+        if row < 0:
+            W.QMessageBox.information(self, 'Choose folder', 'Select a group row first.')
+            return
+        start_folder = self.input_dir.text() or str(Path.cwd())
+        folder = W.QFileDialog.getExistingDirectory(self, 'Select mouse run or pixels folder', start_folder)
+        if not folder:
+            return
+        default_folder = Path(self.input_dir.text() or Path.cwd()).resolve()
+        p_res = Path(folder).resolve()
+        try:
+            rel = str(p_res.relative_to(default_folder))
+        except ValueError:
+            rel = str(p_res)
+        current = [f.strip() for f in self.table.item(row, 1).text().split(';') if f.strip()]
+        if rel not in current:
+            current.append(rel)
+        self.table.item(row, 1).setText('; '.join(current))
+
+    def import_cage_roi_folder(self, folder: Path | str | None = None):
+        """Import cage configuration from a CAGE ROI export run directory."""
+        if not folder:
+            start = self.input_dir.text() or str(Path.cwd())
+            folder = W.QFileDialog.getExistingDirectory(self, 'Select Cage ROI export folder', start)
+            if not folder:
+                return
+        run_path = Path(folder).resolve()
+        config_path = run_path / 'roi_config.json'
+        manifest_path = run_path / 'manifest.json'
+
+        cages = []
+        if config_path.is_file():
+            try:
+                data = json.loads(config_path.read_text(encoding='utf-8'))
+                cages = data.get('cages', [])
+            except Exception:
+                pass
+        if not cages and manifest_path.is_file():
+            try:
+                data = json.loads(manifest_path.read_text(encoding='utf-8'))
+                cages = data.get('config', {}).get('cages', [])
+            except Exception:
+                pass
+
+        if not cages:
+            # Fallback: scan for mouse subdirectories with timeseries or pixels
+            subdirs = [p for p in run_path.iterdir()
+                       if p.is_dir() and ((p / 'temperature_timeseries.csv').is_file() or (p / 'pixels').is_dir())]
+            for sd in sorted(subdirs):
+                genotype = 'WT' if 'wt' in sd.name.lower() else 'Dravet'
+                cages.append({'mouse_id': sd.name, 'genotype': genotype})
+
+        if not cages:
+            W.QMessageBox.warning(self, 'Invalid ROI run',
+                                  f'No cage selections found in {run_path.name}.\n'
+                                  'Select a run folder containing roi_config.json or mouse folders.')
+            return
+
+        self._last_imported_roi_folder = run_path
+        self._last_imported_cages = cages
+        self.input_dir.setText(str(run_path))
+        self._update_table_from_cages()
+
+    def _update_table_from_cages(self):
+        """Re-populate group table using the imported cages and current data mode."""
+        if not getattr(self, '_last_imported_cages', None):
+            return
+        run_path = self._last_imported_roi_folder
+        use_pixels = hasattr(self, 'mode_pixels') and self.mode_pixels.isChecked()
+
+        groups = {}
+        for c in self._last_imported_cages:
+            m_id = c['mouse_id']
+            genotype = c.get('genotype', 'WT').strip() or 'WT'
+            if use_pixels and (run_path / m_id / 'pixels').is_dir():
+                target = f"{m_id}/pixels"
+            elif (run_path / m_id / 'temperature_timeseries.csv').is_file():
+                target = f"{m_id}/temperature_timeseries.csv"
+            else:
+                target = m_id
+            groups.setdefault(genotype, []).append(target)
+
+        self.table.setRowCount(0)
+        for name, files in groups.items():
+            self._add_group(name, files)
 
     def _add_spin(self, form, key, label, minimum, maximum, default, saved):
         control = W.QSpinBox()
@@ -227,7 +342,7 @@ class GroupThermalPlotDialog(W.QDialog):
                 return
             groups[name] = filenames
         if not groups:
-            W.QMessageBox.warning(self, 'Invalid groups', 'Add at least one group with single-mouse CSV files.')
+            W.QMessageBox.warning(self, 'Invalid groups', 'Add at least one group with single-mouse thermal files (CSV or NPZ).')
             return
 
         tz_str = self.controls['timezone'].text().strip()

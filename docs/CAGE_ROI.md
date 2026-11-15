@@ -43,8 +43,11 @@ The banner above Export states whether the export has started. If it says
 checkbox). After choosing the output folder it changes to **EXPORT RUNNING**,
 with an updating elapsed clock and processed-frame count. The progress bar shows
 the percentage; the line below it estimates remaining time. **EXPORT COMPLETE**
-means the files are saved and verified. Failure or cancellation remains visible
-in the banner. Cancelling the folder dialog does not start an export.
+means the files are saved and verified. Click **Plot thermal figure…** to immediately
+launch the multi-mouse thermal plot dialog pre-populated with each cage's mouse ID,
+genotype, and timeseries, or click **Open last export** to view the saved files.
+Failure or cancellation remains visible in the banner. Cancelling the folder dialog
+does not start an export.
 
 The ROI is a fixed cage region, not a tracked mouse body. Check that the camera
 and cages did not move. A full-cage mean includes bedding and other cage contents;

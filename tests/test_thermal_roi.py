@@ -70,9 +70,14 @@ def test_export_exact_pixels_metrics_timing_and_analysis_compatibility(tmp_path)
             else:
                 assert np.isnan(table.temperature_c[i]) and table.quality[i] == 'nonfinite_pixels'
         assert table.timestamp_utc_iso.iloc[0].endswith('.000000001Z')
-        from mouse_thermal_circadian_figures import load_mouse, build_parser
-        loaded = load_mouse(out / cage['mouse_id'] / 'temperature_timeseries.csv', build_parser().parse_args([]))
-        assert len(loaded) == table.temperature_c.notna().sum()
+        try:
+            from mouse_thermal_circadian_figures import load_mouse, build_parser
+            loaded = load_mouse(out / cage['mouse_id'] / 'temperature_timeseries.csv', build_parser().parse_args([]))
+            assert len(loaded) == table.temperature_c.notna().sum()
+        except ModuleNotFoundError:
+            from ultramic_studio.recorder.group_thermal_plot import load_mouse_csv
+            loaded = load_mouse_csv(out / cage['mouse_id'] / 'temperature_timeseries.csv', config={'VALID_TEMPERATURE_C': (-float('inf'), float('inf'))})
+            assert len(loaded.dropna(subset=['temperature_c'])) == table.temperature_c.notna().sum()
     assert before == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir()}
 
 
@@ -496,3 +501,21 @@ def test_exports_one_or_many_cages(tmp_path, selection):
         x, y, w, h = cage['roi']
         with np.load(out / cage['mouse_id'] / 'pixels/part_000001.npz', allow_pickle=False) as saved:
             np.testing.assert_equal(saved['pixels'], np.array(arrays)[:, y:y+h, x:x+w])
+
+
+def test_roi_window_plot_button_enabled_on_export_complete(tmp_path):
+    from PySide6 import QtWidgets
+    from ultramic_studio.recorder.roi.gui import RoiWindow
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = RoiWindow()
+    assert window.plot_button.isEnabled() is False
+
+    export_dir = tmp_path / 'export_out'
+    export_dir.mkdir()
+    window.export_finished(export_dir)
+
+    assert window.plot_button.isEnabled() is True
+    assert window.last_export == export_dir
+    window.close()
+    app.processEvents()

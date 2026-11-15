@@ -189,9 +189,13 @@ class RoiWindow(W.QMainWindow):
         self.cancel_button.clicked.connect(self.cancel_export)
         self.cancel_button.setEnabled(False)
         actions.addWidget(self.cancel_button)
-        open_result = W.QPushButton('Open last export')
-        open_result.clicked.connect(self.open_result)
-        actions.addWidget(open_result)
+        self.open_result_button = W.QPushButton('Open last export')
+        self.open_result_button.clicked.connect(self.open_result)
+        actions.addWidget(self.open_result_button)
+        self.plot_button = W.QPushButton('Plot thermal figure…')
+        self.plot_button.clicked.connect(self.open_thermal_plot)
+        self.plot_button.setEnabled(False)
+        actions.addWidget(self.plot_button)
         layout.addLayout(actions)
 
         self.progress_bar = W.QProgressBar()
@@ -670,12 +674,32 @@ class RoiWindow(W.QMainWindow):
         self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(1000)
         self.progress_bar.setFormat('Complete — 100%')
-        self.set_export_status('complete', 'EXPORT COMPLETE — click “Open last export” to view the saved files.')
+        self.set_export_status('complete', 'EXPORT COMPLETE — click “Plot thermal figure…” or “Open last export”.')
+        self.plot_button.setEnabled(True)
         self.message(f'Export complete: {out}')
 
     def open_result(self):
         if self.last_export:
             G.QDesktopServices.openUrl(C.QUrl.fromLocalFile(str(self.last_export)))
+
+    def open_thermal_plot(self):
+        if not self.last_export:
+            return
+        from ultramic_studio.recorder.group_thermal_dialog import GroupThermalPlotDialog
+        from ultramic_studio.recorder.group_thermal_plot import create_group_plot
+
+        prefs = getattr(self.coordinator, 'settings', None)
+        dialog = GroupThermalPlotDialog(self, prefs, self.last_export)
+        dialog.import_cage_roi_folder(self.last_export)
+        if dialog.exec():
+            data = dialog.result_data
+            try:
+                settings = {k: v for k, v in data.items() if k not in ('input_dir', 'groups')}
+                output = create_group_plot(data['input_dir'], data['groups'], settings=settings)
+                self.message(f'Thermal figure saved: {output.name}')
+                G.QDesktopServices.openUrl(C.QUrl.fromLocalFile(str(output)))
+            except Exception as exc:
+                W.QMessageBox.warning(self, 'Thermal plot error', str(exc))
 
     def closeEvent(self, event):
         if self.thread is not None:

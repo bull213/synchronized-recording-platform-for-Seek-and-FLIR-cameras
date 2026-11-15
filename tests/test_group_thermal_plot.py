@@ -1,4 +1,5 @@
 import csv
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -316,4 +317,115 @@ def test_dialog_new_settings_controls(tmp_path):
     assert dialog2.lights_off.time().toString('HH:mm') == '18:30'
     dialog.close()
     dialog2.close()
+    app.processEvents()
+
+
+def test_load_npz_frames_matches_csv_values(tmp_path):
+    start = 1_800_000_000_000_000_000
+    frames = [np.full((5, 5), 30.0 + i) for i in range(6)]
+    # Place a clear peak at center
+    for i, f in enumerate(frames):
+        f[2, 2] = 32.0 + i
+
+    # Write seek CSV
+    csv_path = tmp_path / 'mouse.csv'
+    write_seek(csv_path, start_ns=start, frames=frames, step_ns=1_000_000_000)
+
+    # Write NPZ chunks
+    mouse_dir = tmp_path / 'mouse_npz'
+    pixels_dir = mouse_dir / 'pixels'
+    pixels_dir.mkdir(parents=True)
+    np.savez(pixels_dir / 'part_000001.npz',
+             pixels=np.array(frames[:3]),
+             timestamp_utc_ns=np.array([start + i * 1_000_000_000 for i in range(3)], dtype=np.int64),
+             source_frame_index=np.arange(3, dtype=np.int64))
+    np.savez(pixels_dir / 'part_000002.npz',
+             pixels=np.array(frames[3:]),
+             timestamp_utc_ns=np.array([start + (i + 3) * 1_000_000_000 for i in range(3)], dtype=np.int64),
+             source_frame_index=np.arange(3, 6, dtype=np.int64))
+
+    cfg = config()
+    df_csv = load_mouse_csv(csv_path, cfg)
+    df_npz_part = load_mouse_csv(pixels_dir / 'part_000001.npz', cfg)
+    df_npz_dir = load_mouse_csv(mouse_dir, cfg)
+
+    # NPZ chunks should match CSV exactly
+    np.testing.assert_allclose(df_csv.temperature_c, df_npz_dir.temperature_c)
+    assert list(df_csv.datetime_utc) == list(df_npz_dir.datetime_utc)
+    assert len(df_npz_part) == 6  # Single part detected sibling part_000002.npz
+    assert df_npz_dir.mouse_id.iloc[0] == 'mouse_npz'
+
+
+def test_group_plot_accepts_npz_directory(tmp_path):
+    start = 1_800_000_000_000_000_000
+    frames = [np.full((3, 3), 30.0) for _ in range(600)]
+
+    # Group WT in NPZ chunks
+    wt_dir = tmp_path / 'WT_mouse'
+    (wt_dir / 'pixels').mkdir(parents=True)
+    np.savez(wt_dir / 'pixels' / 'part_000001.npz',
+             pixels=np.array(frames),
+             timestamp_utc_ns=np.array([start + i * 1_000_000_000 for i in range(600)], dtype=np.int64))
+
+    # Group Dravet in CSV
+    dr_path = tmp_path / 'dr.csv'
+    write_seek(dr_path, start_ns=start, frames=frames)
+
+    cfg = config(OUTPUT_DIR=str(tmp_path), BIN_MINUTES=1, PLOT_HOURS=1,
+                 MIN_SAMPLES_PER_MINUTE=30, MINUTE_COVERAGE_FRACTION=.8)
+    groups = {'WT': [str(wt_dir)], 'Dravet': ['dr.csv']}
+    output = create_group_plot(tmp_path, groups, settings=cfg)
+    assert output.is_file()
+
+
+def test_import_cage_roi_auto_populates_groups(tmp_path):
+    from PySide6 import QtWidgets
+    from ultramic_studio.recorder.group_thermal_dialog import GroupThermalPlotDialog
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    run_dir = tmp_path / 'roi_run'
+    run_dir.mkdir()
+
+    # Create roi_config.json
+    config_data = {
+        'schema_version': 1,
+        'cages': [
+            {'mouse_id': 'WT_01', 'genotype': 'WT', 'roi': [0, 0, 10, 10]},
+            {'mouse_id': 'WT_02', 'genotype': 'WT', 'roi': [10, 0, 10, 10]},
+            {'mouse_id': 'DR_01', 'genotype': 'Dravet', 'roi': [20, 0, 10, 10]},
+        ]
+    }
+    (run_dir / 'roi_config.json').write_text(json.dumps(config_data))
+
+    # Create dummy timeseries and pixels
+    for cage in config_data['cages']:
+        m_dir = run_dir / cage['mouse_id']
+        m_dir.mkdir()
+        (m_dir / 'pixels').mkdir()
+        np.savez(m_dir / 'pixels' / 'part_000001.npz',
+                 pixels=np.full((2, 5, 5), 30.0),
+                 timestamp_utc_ns=np.array([1_800_000_000_000_000_000, 1_800_001_000_000_000_000], dtype=np.int64))
+        df = pd.DataFrame({
+            'timestamp_utc_iso': ['2027-01-01T07:00:00Z', '2027-01-01T07:00:01Z'],
+            'temperature_c': [30.5, 30.6],
+            'mouse_id': [cage['mouse_id'], cage['mouse_id']]
+        })
+        df.to_csv(m_dir / 'temperature_timeseries.csv', index=False)
+
+    dialog = GroupThermalPlotDialog(None, None, run_dir)
+    # Verify auto-import populated groups
+    assert dialog.table.rowCount() == 2
+    row_data = {dialog.table.item(r, 0).text(): dialog.table.item(r, 1).text() for r in range(dialog.table.rowCount())}
+    assert 'WT' in row_data and 'Dravet' in row_data
+    assert 'WT_01/temperature_timeseries.csv' in row_data['WT']
+    assert 'WT_02/temperature_timeseries.csv' in row_data['WT']
+    assert 'DR_01/temperature_timeseries.csv' in row_data['Dravet']
+
+    # Test switching to raw pixels mode
+    dialog.mode_pixels.setChecked(True)
+    row_data_pixels = {dialog.table.item(r, 0).text(): dialog.table.item(r, 1).text() for r in range(dialog.table.rowCount())}
+    assert 'WT_01/pixels' in row_data_pixels['WT']
+    assert 'DR_01/pixels' in row_data_pixels['Dravet']
+
+    dialog.close()
     app.processEvents()
