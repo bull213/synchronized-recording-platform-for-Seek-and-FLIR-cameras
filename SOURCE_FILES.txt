@@ -30,6 +30,7 @@ camera_runtime.py
 docs/CAGE_ROI.md
 docs/DEVELOPMENT.md
 docs/PUBLISHING.md
+docs/PROJECT_STRUCTURE.md
 docs/RECORDER_GUI.md
 docs/SETUP.md
 docs/SYNCHRONIZATION.md
@@ -38,6 +39,7 @@ docs/TRIGGERS.md
 docs/VALIDATION.md
 docs/images/unified_cameras.png
 docs/images/unified_spectrogram.png
+docs/images/seek-example-output.png
 docs/licenses/GPL-2.0.txt
 docs/licenses/GPL-3.0.txt
 docs/licenses/LGPL-2.1.txt

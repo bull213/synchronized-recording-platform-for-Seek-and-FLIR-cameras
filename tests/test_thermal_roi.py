@@ -70,9 +70,11 @@ def test_export_exact_pixels_metrics_timing_and_analysis_compatibility(tmp_path)
             else:
                 assert np.isnan(table.temperature_c[i]) and table.quality[i] == 'nonfinite_pixels'
         assert table.timestamp_utc_iso.iloc[0].endswith('.000000001Z')
-        from mouse_thermal_circadian_figures import load_mouse, build_parser
-        loaded = load_mouse(out / cage['mouse_id'] / 'temperature_timeseries.csv', build_parser().parse_args([]))
-        assert len(loaded) == table.temperature_c.notna().sum()
+        assert len(table) == len(arrays)
+        assert {'timestamp_utc_iso', 'temperature_c', 'roi_mean_c',
+                'warmest_5pct_mean_c', 'quality'} <= set(table.columns)
+        assert table.temperature_c.notna().sum() == sum(np.isfinite(a[y:y+h, x:x+w]).all()
+                                                        for a in arrays)
     assert before == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir()}
 
 

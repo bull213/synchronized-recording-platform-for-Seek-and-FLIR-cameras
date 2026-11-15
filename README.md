@@ -59,6 +59,12 @@ microphone. This saves Seek MP4 video, thermal CSV data, and timing reports.
 All Seek sampling and calibration options remain available; connected FLIRs
 are excluded from the recording. Switching recording modes starts a new session folder.
 
+### Example Seek output
+
+The image below shows an example thermal frame from the Seek output pipeline.
+
+![Example thermal frame from the Seek output pipeline](docs/images/seek-example-output.png)
+
 For independent media-only recording, select **FLIR only (.mp4)** or
 **Microphone only (.mp3)**. FLIR mode saves one MP4 per connected FLIR camera
 without requiring Seek or a microphone. Microphone mode requires only a connected
