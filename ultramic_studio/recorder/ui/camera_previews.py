@@ -78,6 +78,15 @@ def render_camera_previews(window):
         return
     with window.core.latest_ir_lock:
         snap = window.core.latest_ir
+    if snap and len(snap) > 2 and snap[2] is not None:
+        try:
+            t_min = float(snap[2].min())
+            t_max = float(snap[2].max())
+            seek_preview = window._preview_labels.get('seek')
+            if seek_preview:
+                seek_preview.setToolTip(f'Seek Thermal: {t_min:.1f} °C min, {t_max:.1f} °C max. Double-click to enlarge.')
+        except Exception:
+            pass
     frames = {'seek': cv2.cvtColor(snap[1], cv2.COLOR_BGRA2BGR)} if snap else {}
     with window.core.flir_preview_lock:
         frames.update({f'flir_{idx}': frame.copy() for idx, frame in window.core.flir_previews.items()})

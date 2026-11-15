@@ -1,4 +1,4 @@
-"""Standalone cage ROI selector. Run with the project's configured Python."""
+"""Standalone cage ROI selector for Seek thermal and FLIR camera recordings."""
 from __future__ import annotations
 
 import csv
@@ -12,10 +12,9 @@ import cv2
 import numpy as np
 from PySide6 import QtCore as C, QtGui as G, QtWidgets as W
 
-from .exporter import (colorize, export_rois, first_frame, load_config, make_config,
-                         atomic_json, validate_cages, ExportCancelled, parse_pixels)
+from .exporter import (colorize, export_rois, export_flir_rois, first_frame, load_config, make_config,
+                       atomic_json, validate_cages, ExportCancelled, parse_pixels)
 from ultramic_studio.theme import RECORDER_STYLE
-
 
 from .canvas import COLORS, CageCanvas
 from .preview import NativeBrowser, inspect_recording, video_preview
@@ -27,7 +26,7 @@ class RoiWindow(W.QMainWindow):
         super().__init__(parent, C.Qt.WindowType.Window)
         self.coordinator = coordinator
         self._holds_export_guard = False
-        self.setWindowTitle('Cage ROI · Thermal data exporter')
+        self.setWindowTitle('Cage ROI · Data exporter')
         self.setStyleSheet(RECORDER_STYLE)
         area = self.screen().availableGeometry()
         self.resize(min(1120, area.width() - 24), min(780, area.height() - 48))
@@ -41,14 +40,22 @@ class RoiWindow(W.QMainWindow):
         self._export_active = False
         self._export_frames = 0
         self._export_started = 0.
+        self.inspection = None
+        self.active_stream_key = 'seek'
+        self.active_modality = 'thermal'
+        self.has_video = False
+        self.stream_info = None
+
         self.export_timer = C.QTimer(self)
         self.export_timer.setInterval(1000)
         self.export_timer.timeout.connect(self.update_running_status)
+
         widget = W.QWidget()
         layout = W.QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(5)
         self.setCentralWidget(widget)
+
         self.controls = W.QWidget()
         top = W.QHBoxLayout(self.controls)
         top.setContentsMargins(0, 0, 0, 0)
@@ -57,10 +64,23 @@ class RoiWindow(W.QMainWindow):
             button = W.QPushButton(text)
             button.clicked.connect(fn)
             top.addWidget(button)
+
+        self.stream_label = W.QLabel('Camera stream:')
+        self.stream_selector = W.QComboBox()
+        self.stream_selector.setAccessibleName('Active camera stream')
+        self.stream_selector.currentIndexChanged.connect(self.stream_changed)
+        self.stream_label.setVisible(False)
+        self.stream_selector.setVisible(False)
+        top.addWidget(self.stream_label)
+        top.addWidget(self.stream_selector)
+        top.addStretch(1)
+
         layout.addWidget(self.controls)
-        self.source_label = W.QLabel('Select a finished recording folder with Seek thermal data.')
+
+        self.source_label = W.QLabel('Select a finished recording folder with Seek or FLIR data.')
         self.source_label.setWordWrap(True)
         layout.addWidget(self.source_label)
+
         self.body = W.QWidget()
         row = W.QHBoxLayout(self.body)
         row.setContentsMargins(0, 0, 0, 0)
@@ -68,6 +88,7 @@ class RoiWindow(W.QMainWindow):
         self.canvas.changed.connect(self.change_roi)
         self.canvas.selected.connect(lambda i: self.cage_list.setCurrentRow(i))
         row.addWidget(self.canvas, 1)
+
         panel = W.QWidget()
         panel.setMaximumWidth(300)
         side = W.QVBoxLayout(panel)
@@ -83,6 +104,7 @@ class RoiWindow(W.QMainWindow):
             button = W.QPushButton(text)
             button.clicked.connect(fn)
             side.addWidget(button)
+
         self.coordinates = W.QGroupBox('Cage coordinates (pixels)')
         coordinates_layout = W.QVBoxLayout(self.coordinates)
         coordinates_layout.setContentsMargins(8, 8, 8, 8)
@@ -94,7 +116,7 @@ class RoiWindow(W.QMainWindow):
             field = W.QSpinBox()
             field.setRange(minimum, 4096)
             field.setAccessibleName(f'Cage {title.lower()} in pixels')
-            field.setToolTip('Native thermal image coordinates in pixels.')
+            field.setToolTip('Native image coordinates in pixels.')
             form.addRow(title, field)
             self.coordinate_fields.append(field)
         columns.addLayout(left)
@@ -105,6 +127,7 @@ class RoiWindow(W.QMainWindow):
         coordinates_layout.addWidget(self.apply_coordinates)
         self.coordinates.setEnabled(False)
         side.addWidget(self.coordinates)
+
         self.crop = W.QLabel('Selected cage preview')
         self.crop.setMinimumSize(180, 160)
         self.crop.setAlignment(C.Qt.AlignmentFlag.AlignCenter)
@@ -119,6 +142,7 @@ class RoiWindow(W.QMainWindow):
         self.review.setChecked(False)
         self.review.toggled.connect(self.update_export_readiness)
         side.addWidget(self.review)
+
         sidebar = W.QScrollArea()
         sidebar.setWidgetResizable(True)
         sidebar.setMinimumWidth(280)
@@ -126,12 +150,13 @@ class RoiWindow(W.QMainWindow):
         sidebar.setWidget(panel)
         row.addWidget(sidebar)
         layout.addWidget(self.body, 1)
+
         self.browse_controls = W.QWidget()
         browser = W.QHBoxLayout(self.browse_controls)
         browser.setContentsMargins(0, 0, 0, 0)
-        native = W.QPushButton('Native thermal frame')
-        native.clicked.connect(self.native_preview)
-        browser.addWidget(native)
+        self.native_button = W.QPushButton('Native thermal frame')
+        self.native_button.clicked.connect(self.native_preview)
+        browser.addWidget(self.native_button)
         self.slider = W.QSlider(C.Qt.Orientation.Horizontal)
         self.slider.setAccessibleName('Recording preview position')
         self.slider.sliderReleased.connect(self.browse_video)
@@ -140,19 +165,22 @@ class RoiWindow(W.QMainWindow):
         preview_button.clicked.connect(self.browse_video)
         browser.addWidget(preview_button)
         layout.addWidget(self.browse_controls)
-        self.preview_label = W.QLabel('Review cage positions. Export includes thermal data and, when selected, cropped Seek video.')
+
+        self.preview_label = W.QLabel('Review cage positions. Export includes thermal data and, when selected, cropped video.')
         self.preview_label.setWordWrap(True)
         layout.addWidget(self.preview_label)
+
         self.export_status = W.QLabel()
         self.export_status.setAccessibleName('Cage export status')
         self.export_status.setWordWrap(True)
         self.export_status.setMinimumHeight(44)
         status_row = W.QHBoxLayout()
         status_row.addWidget(self.export_status, 1)
-        self.include_video = W.QCheckBox('Export cropped Seek video')
+        self.include_video = W.QCheckBox('Export cropped video')
         self.include_video.setChecked(coordinator is not None)
         status_row.addWidget(self.include_video)
         layout.addLayout(status_row)
+
         actions = W.QHBoxLayout()
         self.export_button = W.QPushButton('Export pixels + temperatures…')
         self.export_button.clicked.connect(self.export)
@@ -165,6 +193,7 @@ class RoiWindow(W.QMainWindow):
         open_result.clicked.connect(self.open_result)
         actions.addWidget(open_result)
         layout.addLayout(actions)
+
         self.progress_bar = W.QProgressBar()
         self.progress_bar.setAccessibleName('Cage export progress')
         self.progress_bar.setMinimumHeight(22)
@@ -183,9 +212,9 @@ class RoiWindow(W.QMainWindow):
     def set_export_status(self, state, text):
         colors = {'waiting': '#e3a008', 'ready': '#4c9aff', 'running': '#4c9aff',
                   'complete': '#3fb950', 'error': '#ef5b60', 'cancelled': '#e3a008'}
-        color = colors[state]
+        color = colors.get(state, '#4c9aff')
         self.export_status.setStyleSheet(f'QLabel {{ background:#1f2630; color:{color}; '
-                                        f'border:1px solid {color}; border-radius:5px; padding:8px; font-weight:600; }}')
+                                         f'border:1px solid {color}; border-radius:5px; padding:8px; font-weight:600; }}')
         self.export_status.setText(text)
         self.export_status.setAccessibleName('Cage export status: ' + text)
 
@@ -199,7 +228,8 @@ class RoiWindow(W.QMainWindow):
         elif not self.review.isChecked():
             text = 'Export not running — check “Cage boundaries checked for this recording” on the right, then press Export.'
         else:
-            self.set_export_status('ready', 'Ready to export — press Export and choose an output folder to start.')
+            modality_text = 'FLIR optical video' if getattr(self, 'active_modality', None) == 'video' else 'thermal data'
+            self.set_export_status('ready', f'Ready to export {modality_text} — press Export and choose an output folder to start.')
             return
         self.set_export_status('waiting', text)
 
@@ -272,9 +302,15 @@ class RoiWindow(W.QMainWindow):
         self.browse_controls.setEnabled(True)
         self.export_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
-        self.include_video.setEnabled(True)
+        if getattr(self, 'active_modality', None) == 'video':
+            self.include_video.setEnabled(True)
+        else:
+            self.include_video.setEnabled(getattr(self, 'has_video', False))
         self.cancel_button.setText('Cancel export')
-        self.export_button.setText('Export pixels + temperatures…')
+        if getattr(self, 'active_modality', None) == 'video':
+            self.export_button.setText('Export cropped FLIR video…')
+        else:
+            self.export_button.setText('Export pixels + temperatures…')
         if self._holds_export_guard:
             self.coordinator.end_roi_export()
             self._holds_export_guard = False
@@ -287,27 +323,99 @@ class RoiWindow(W.QMainWindow):
             self.load_recording(root)
 
     def load_recording(self, root):
-        self.message('Reading first thermal frame and video index…')
+        self.message('Inspecting recording streams…')
         self.run_task(lambda _: inspect_recording(root), self.recording_loaded)
 
     def recording_loaded(self, result):
-        self.root, self.frame, self.previews = result
-        height, width = self.frame.pixels.shape
+        # Support both (root, frame, previews) 3-tuple and rich InspectionResult
+        self.inspection = result if hasattr(result, 'streams') else None
+        self.root, self.frame, self.previews = result[:3]
+
+        if self.inspection and len(self.inspection.streams) > 1:
+            self.stream_selector.blockSignals(True)
+            self.stream_selector.clear()
+            for key, info in self.inspection.streams.items():
+                self.stream_selector.addItem(info.label, key)
+            idx = self.stream_selector.findData(self.inspection.active_stream)
+            if idx >= 0:
+                self.stream_selector.setCurrentIndex(idx)
+            self.stream_selector.blockSignals(False)
+            self.stream_label.setVisible(True)
+            self.stream_selector.setVisible(True)
+        else:
+            self.stream_label.setVisible(False)
+            self.stream_selector.setVisible(False)
+
+        active_key = self.inspection.active_stream if self.inspection else 'seek'
+        self.apply_active_stream(active_key)
+
+    def stream_changed(self, index):
+        if index < 0 or not self.inspection:
+            return
+        key = self.stream_selector.itemData(index)
+        if key and key != getattr(self, 'active_stream_key', None):
+            self.apply_active_stream(key)
+
+    def apply_active_stream(self, stream_key):
+        stream_info = self.inspection.streams.get(stream_key) if self.inspection else None
+        if stream_info:
+            self.active_stream_key = stream_key
+            self.active_modality = stream_info.modality
+            self.frame = stream_info.first_frame
+            self.previews = stream_info.previews
+            self.has_video = stream_info.has_video
+            self.stream_info = stream_info
+        else:
+            self.active_stream_key = 'seek'
+            self.active_modality = 'thermal'
+            self.has_video = False
+            self.stream_info = None
+
+        height, width = self.frame.pixels.shape[:2]
         for field, maximum in zip(self.coordinate_fields, (width - 1, height - 1, width, height)):
             field.setMaximum(maximum)
-        self.native_browser = NativeBrowser(self.root, self.frame.pixels.shape)
+
+        if self.active_modality == 'thermal':
+            self.native_browser = NativeBrowser(self.root, (height, width))
+            self.native_button.setEnabled(True)
+            self.native_button.setToolTip('')
+            if self.has_video:
+                self.include_video.setEnabled(True)
+                self.include_video.setChecked(self.coordinator is not None)
+                self.include_video.setText('Export cropped Seek video')
+                self.include_video.setToolTip('')
+            else:
+                self.include_video.setChecked(False)
+                self.include_video.setEnabled(False)
+                self.include_video.setText('No Seek video in recording (thermal export only)')
+                self.include_video.setToolTip('Only thermal pixel CSV was found; video cropping is disabled.')
+            self.export_button.setText('Export pixels + temperatures…')
+            self.canvas.set_image(colorize(self.frame.pixels))
+            self.preview_label.setText(f'Native thermal frame {self.frame.index} · calibrated Celsius')
+            stream_desc = 'Seek thermal' + (' + video' if self.has_video else ' (thermal only)')
+        else:
+            self.native_browser = None
+            self.native_button.setEnabled(False)
+            self.native_button.setToolTip('FLIR camera is optical video (no thermal Celsius pixels).')
+            self.include_video.setChecked(True)
+            self.include_video.setEnabled(True)
+            self.include_video.setText('Export cropped FLIR video')
+            self.include_video.setToolTip('Crop the optical FLIR video to the cage regions.')
+            self.export_button.setText('Export cropped FLIR video…')
+            self.canvas.set_image(self.frame.pixels)
+            self.preview_label.setText(f'FLIR frame {self.frame.index} · optical video')
+            stream_desc = getattr(stream_info, 'label', 'FLIR Camera')
+
         self.cages = []
         self.slider.setRange(0, max(0, len(self.previews) - 1))
         self.slider.setValue(0)
         self.review.setChecked(False)
-        self.source_label.setText(str(self.root))
+        self.source_label.setText(f'{self.root} · {stream_desc}')
         self.refresh_cages()
-        self.canvas.set_image(colorize(self.frame.pixels))
-        self.preview_label.setText(f'Native thermal frame {self.frame.index} · calibrated Celsius')
-        self.message('Add a cage and drag its rectangle. Default names are WT_01, WT_02, …')
+        self.message(f'{stream_desc} loaded. Add a cage and drag its rectangle.')
 
     def native_preview(self):
-        if self.frame is None or self.thread is not None:
+        if self.frame is None or self.thread is not None or self.native_browser is None:
             return
         position = self.slider.value()
         entry = self.previews[position]
@@ -324,9 +432,14 @@ class RoiWindow(W.QMainWindow):
     def browse_video(self):
         if self.frame is None or not self.previews:
             return
+        if not getattr(self, 'has_video', False) and self.native_browser is not None:
+            self.native_preview()
+            return
         entry = self.previews[self.slider.value()]
-        self.run_task(lambda _: video_preview(self.root, entry, self.frame.pixels.shape), self.preview_loaded)
-        self.preview_label.setText(f'Video frame {entry[2]} · UTC ns {entry[3]} · position check only')
+        shape = self.frame.pixels.shape[:2]
+        self.run_task(lambda _: video_preview(self.root, entry, shape), self.preview_loaded)
+        label_kind = 'FLIR video' if getattr(self, 'active_modality', None) == 'video' else 'Video'
+        self.preview_label.setText(f'{label_kind} frame {entry[2]} · timestamp {entry[3]}')
 
     def preview_loaded(self, rgb):
         self.canvas.set_image(rgb)
@@ -414,7 +527,7 @@ class RoiWindow(W.QMainWindow):
         else:
             cages[i]['roi'] = roi
         try:
-            validate_cages(cages, self.frame.pixels.shape)
+            validate_cages(cages, self.frame.pixels.shape[:2])
         except ValueError as exc:
             self.message(str(exc))
             return
@@ -436,7 +549,7 @@ class RoiWindow(W.QMainWindow):
         cages = json.loads(json.dumps(self.cages))
         cages[i].update(mouse_id=name.strip(), genotype=genotype.strip())
         try:
-            validate_cages(cages, self.frame.pixels.shape)
+            validate_cages(cages, self.frame.pixels.shape[:2])
         except ValueError as exc:
             self.message(str(exc))
             return
@@ -454,7 +567,8 @@ class RoiWindow(W.QMainWindow):
         if self.frame is None:
             return
         try:
-            config = make_config(self.root, self.frame.pixels.shape, self.cages)
+            config = make_config(self.root, self.frame.pixels.shape[:2], self.cages,
+                                 stream_info=getattr(self, 'stream_info', None))
             path, _ = W.QFileDialog.getSaveFileName(self, 'Save cage selections', 'roi_config.json', 'JSON (*.json)')
             if path:
                 atomic_json(path, config)
@@ -470,7 +584,7 @@ class RoiWindow(W.QMainWindow):
         if not path:
             return
         try:
-            config, changed = load_config(path, self.root, self.frame.pixels.shape)
+            config, changed = load_config(path, self.root, self.frame.pixels.shape[:2])
             self.cages = config['cages']
             self.review.setChecked(False)
             self.refresh_cages(0)
@@ -490,7 +604,8 @@ class RoiWindow(W.QMainWindow):
             self.review.setFocus()
             return
         try:
-            config = make_config(self.root, self.frame.pixels.shape, self.cages)
+            config = make_config(self.root, self.frame.pixels.shape[:2], self.cages,
+                                 stream_info=getattr(self, 'stream_info', None))
         except ValueError as exc:
             self.message(str(exc))
             self.set_export_status('error', f'Export not started — {exc}')
@@ -510,7 +625,12 @@ class RoiWindow(W.QMainWindow):
             self._holds_export_guard = True
             if self.parent() is not None:
                 self.parent().update_controls()
+
+        stream_info = getattr(self, 'stream_info', None)
+        active_modality = getattr(self, 'active_modality', 'thermal')
         include_video = self.include_video.isChecked()
+        if active_modality == 'thermal' and not getattr(self, 'has_video', False):
+            include_video = False
         self.cancel_event.clear()
         self.progress_bar.setValue(0)
         self.message('Exporting all saved frames for all cages…')
@@ -522,9 +642,12 @@ class RoiWindow(W.QMainWindow):
                 if now - last[0] >= .25:
                     worker.progress.emit(count, fraction, eta)
                     last[0] = now
+            if active_modality == 'video':
+                return export_flir_rois(self.root, config, parent, self.cancel_event, report, stream_info=stream_info)
             if include_video:
                 return export_rois(self.root, config, parent, self.cancel_event, report, include_video=True)
             return export_rois(self.root, config, parent, self.cancel_event, report)
+
         try:
             self.run_task(job, self.export_finished, exporting=True)
         except Exception:

@@ -31,11 +31,15 @@ def test_source_launch_uses_latest_export_and_prefers_local_sdk(source_folder):
 def test_seek_library_lookup_precedence(source_folder, monkeypatch):
     resources = source_folder / '_internal'
     monkeypatch.setattr(camera_runtime, 'resource_folder', lambda: resources)
+    development = (source_folder / 'development' / 'release.dll',
+                   source_folder / 'development' / 'debug.dll')
+    monkeypatch.setattr(camera_runtime, '_SEEK_DEVELOPMENT_LIBRARIES', development)
     candidates = [resources / camera_runtime.SEEK_LIBRARY,
                   source_folder / camera_runtime.SEEK_LIBRARY,
                   source_folder / 'seekcamera.dll',
                   source_folder / 'exports' / '20261009' / 'SyncRecorder' / '_internal' / camera_runtime.SEEK_LIBRARY,
-                  source_folder / 'exports' / '20261008' / 'SyncRecorder' / '_internal' / camera_runtime.SEEK_LIBRARY]
+                  source_folder / 'exports' / '20261008' / 'SyncRecorder' / '_internal' / camera_runtime.SEEK_LIBRARY,
+                  *development]
     override = source_folder / 'override.dll'
     for path in [override, *candidates]:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,10 +58,13 @@ def test_seek_library_lookup_precedence(source_folder, monkeypatch):
         camera_runtime.find_seek_dll()
 
 
-def test_frozen_launch_excludes_source_export_fallbacks(source_folder, monkeypatch):
+def test_frozen_launch_excludes_existing_development_libraries(source_folder, monkeypatch):
     exported = source_folder / 'exports' / '20261009' / 'SyncRecorder' / '_internal' / camera_runtime.SEEK_LIBRARY
     exported.parent.mkdir(parents=True)
     exported.write_bytes(b'exported library fixture')
+    development = source_folder / 'development.dll'
+    development.write_bytes(b'development library fixture')
+    monkeypatch.setattr(camera_runtime, '_SEEK_DEVELOPMENT_LIBRARIES', (development,))
     monkeypatch.setattr(camera_runtime.sys, 'frozen', True)
     with pytest.raises(FileNotFoundError, match='complete exported folder'):
         camera_runtime.find_seek_dll()

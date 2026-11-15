@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=65.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ultramic-studio"
+version = "2.0.0"
+description = "Synchronized recording platform for Seek thermal cameras, FLIR optical cameras, and Ultramic bioacoustic audio."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "UltramicStudio Contributors" },
+]
+keywords = [
+    "thermal-imaging",
+    "seek-thermal",
+    "flir",
+    "bioacoustics",
+    "ultrasound",
+    "ultramic",
+    "synchronized-recording",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "PySide6>=6.5",
+    "pyqtgraph>=0.13",
+    "sounddevice>=0.4",
+    "pyserial>=3.5",
+    "lameenc>=1.7",
+    "matplotlib>=3.7",
+    "tzdata>=2023.3",
+]
+
+[project.optional-dependencies]
+figure = [
+    "pandas>=2.0",
+]
+dev = [
+    "pandas>=2.0",
+    "pytest>=8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/bull213/synchronized-recording-platform-for-Seek-and-FLIR-cameras"
+Repository = "https://github.com/bull213/synchronized-recording-platform-for-Seek-and-FLIR-cameras"
+
+[project.scripts]
+ultramic-studio = "ultramic_studio.recorder.ui.window:RecorderApp.run"
+sync-recorder = "ultramic_studio.recorder.ui.window:RecorderApp.run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ultramic_studio*"]
+

@@ -160,7 +160,7 @@ class DemoSource:
         self.thread.start()
 
     def _run(self) -> None:
-        rng = np.random.default_rng(20261022)
+        rng = np.random.default_rng(681120)
         cursor = 0
         origin = time.monotonic()
         while not self.stop_event.is_set():

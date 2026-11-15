@@ -12,6 +12,7 @@ from PySide6 import QtCore, QtGui, QtWidgets as W
 
 from ultramic_studio.theme import RECORDER_STYLE
 from ultramic_studio.recorder.ui import camera_previews
+from ultramic_studio.recorder.ui.events import handle_camera_events
 from ultramic_studio.recorder.ui.presentation import RecorderPresentation
 from ultramic_studio.recorder.coordinator import RecordingCoordinator
 from ultramic_studio.recorder.cameras.calibration import SEEK_CALIBRATIONS, get_seek_calibration
@@ -23,6 +24,8 @@ from ultramic_studio.triggers import SerialTrigger, SoftwareTrigger
 
 
 class UnifiedWindow(RecorderPresentation, MainWindow):
+    """Main window integrating thermal, optical, and ultrasonic acquisition."""
+
     def __init__(self, core, *, demo_audio=False):
         self.core = core
         self.controller = RecordingCoordinator(core)
@@ -47,35 +50,49 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         self.setMinimumSize(560, 320)
         self._fit_screen()
         QtCore.QTimer.singleShot(0, self._restore_sidebar_width)
-        self.statusBar().showMessage('Camera-only recording is available without a microphone.')
+        self._update_status_bar()
         self.controller.connect()
         if demo_audio:
             self.mode.setCurrentIndex(1)
             self.record_mode.setCurrentIndex(1)
             self.toggle_connection()
 
+    # -------------------------------------------------------------------------
+    # Layout and Widget Construction
+    # -------------------------------------------------------------------------
+
     def _build(self):
+        """Construct recording controls, camera preview panes, and triggers."""
         self.settings = QtCore.QSettings('UltramicStudio', 'CombinedRecorder')
         super()._build()
         if not Path(self.output.text()).expanduser().is_dir():
             self.output.setText(str(Path.cwd()))
         self.findChild(W.QLabel, 'title').setText('Seek / FLIR / Ultramic')
-        # Keep shared Record/Stop reachable when the sidebar needs scrolling.
         root = self.centralWidget()
         self.header_widget.hide()
+
+        self._build_mode_and_source_controls()
+        cameras = self._build_camera_monitor_page()
+        self._build_trigger_page()
+        self._build_layout_controls(root)
+        self._build_recorder_presentation()
+        self.update_controls()
+
+    def _build_mode_and_source_controls(self):
         self.record_mode = W.QComboBox()
         self.record_mode.setAccessibleName('Recording mode')
         self.record_mode.addItems(['Cameras only', 'Cameras + microphone',
                                    'FLIR only (.mp4)', 'Microphone only (.mp3)', 'Seek only'])
         self.record_mode.currentIndexChanged.connect(self._mode_changed)
-        source_group = self.source_group
-        source_group.setTitle('01   OPTIONAL MICROPHONE')
+        self.source_group.setTitle('01   OPTIONAL MICROPHONE')
         self.pre.setToolTip('Saved separately as pretrigger.wav. The main WAV begins at the Seek start.')
         self.stop.setToolTip('Stop the shared take; armed external triggers remain active.')
 
+    def _build_camera_monitor_page(self) -> W.QWidget:
         cameras = W.QWidget()
         self.monitor_page = cameras
         layout = W.QVBoxLayout(cameras)
+
         row = W.QHBoxLayout()
         self.camera_status = label('Connecting cameras…')
         self.camera_status.setWordWrap(True)
@@ -83,6 +100,39 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         self.retry_cameras = button('Retry cameras', self.controller.connect)
         row.addWidget(self.retry_cameras)
         layout.addLayout(row)
+
+        options = self._build_seek_options_group()
+        self.camera_options = W.QScrollArea()
+        self.camera_options.setWidgetResizable(True)
+        self.camera_options.setWidget(options)
+        self.camera_options.setFixedHeight(200)
+        layout.addWidget(self.camera_options)
+
+        self.preview_widget = W.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self.preview_widget.setChildrenCollapsible(False)
+        self.preview_widget.setHandleWidth(8)
+        self.preview_widget.setToolTip('Drag the dividers to resize camera previews.')
+        self.preview_scroll = W.QScrollArea()
+        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll.setWidget(self.preview_widget)
+        self.preview_scroll.setMinimumSize(0, 0)
+        layout.addWidget(self.preview_scroll, 1)
+
+        self._reflow_timer = QtCore.QTimer(self)
+        self._reflow_timer.setSingleShot(True)
+        self._reflow_timer.timeout.connect(self._reflow_previews)
+        self.preview_scroll.viewport().installEventFilter(self)
+        self._add_camera_panel('seek', 'Seek camera', 0)
+
+        self.sync_summary = label('Each take saves actual first-stream offsets in its synchronization report.', True)
+        self.sync_summary.setWordWrap(True)
+        layout.addWidget(self.sync_summary)
+
+        self.tabs.insertTab(0, cameras, 'Cameras')
+        self.tabs.setCurrentIndex(0)
+        return cameras
+
+    def _build_seek_options_group(self) -> W.QGroupBox:
         options = W.QGroupBox('Seek camera options')
         grid = W.QGridLayout(options)
         self.sample_mode = W.QComboBox()
@@ -98,6 +148,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         grid.addWidget(self.sample_mode, 0, 1)
         grid.addWidget(self.sample_hz, 0, 2)
         self.sample_mode.currentIndexChanged.connect(self.update_controls)
+
         self.shutter_mode = W.QComboBox()
         self.shutter_mode.addItems(['Automatic', 'Custom'])
         self.shutter_hz = W.QDoubleSpinBox()
@@ -109,6 +160,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         grid.addWidget(self.shutter_hz, 1, 2)
         self.apply_shutter_button = button('Apply shutter', self._apply_shutter)
         grid.addWidget(self.apply_shutter_button, 1, 3)
+
         self.calibration = W.QComboBox()
         for profile in SEEK_CALIBRATIONS.values():
             self.calibration.addItem(profile.label, profile.name)
@@ -118,36 +170,16 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         self._calibration_changed()
         grid.addWidget(label('Calibration used'), 2, 0)
         grid.addWidget(self.calibration, 2, 1, 1, 3)
+
         self.preview_actions = []
         for column, (text, action) in enumerate((('Cycle palette', 'palette'),
                                                ('Cycle pipeline', 'pipeline'), ('Toggle sharpening', 'sharpen'))):
             control = button(text, lambda checked=False, a=action: self._camera_action(a))
             self.preview_actions.append(control)
             grid.addWidget(control, 3, column)
-        self.camera_options = W.QScrollArea()
-        self.camera_options.setWidgetResizable(True)
-        self.camera_options.setWidget(options)
-        self.camera_options.setFixedHeight(200)
-        layout.addWidget(self.camera_options)
-        self.preview_widget = W.QSplitter(QtCore.Qt.Orientation.Vertical)
-        self.preview_widget.setChildrenCollapsible(False)
-        self.preview_widget.setHandleWidth(8)
-        self.preview_widget.setToolTip('Drag the dividers to resize camera previews.')
-        self.preview_scroll = W.QScrollArea()
-        self.preview_scroll.setWidgetResizable(True)
-        self.preview_scroll.setWidget(self.preview_widget)
-        self.preview_scroll.setMinimumSize(0, 0)
-        layout.addWidget(self.preview_scroll, 1)
-        self._reflow_timer = QtCore.QTimer(self)
-        self._reflow_timer.setSingleShot(True)
-        self._reflow_timer.timeout.connect(self._reflow_previews)
-        self.preview_scroll.viewport().installEventFilter(self)
-        self._add_camera_panel('seek', 'Seek camera', 0)
-        self.sync_summary = label('Each take saves actual first-stream offsets in its synchronization report.', True)
-        self.sync_summary.setWordWrap(True)
-        layout.addWidget(self.sync_summary)
-        self.tabs.insertTab(0, cameras, 'Cameras')
-        self.tabs.setCurrentIndex(0)
+        return options
+
+    def _build_trigger_page(self):
         trigger_page = W.QWidget()
         trigger_layout = W.QVBoxLayout(trigger_page)
         group = self.trigger_group
@@ -158,9 +190,6 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         trigger_layout.addWidget(note)
         trigger_layout.addStretch()
         self.tabs.addTab(trigger_page, 'Triggers')
-        self._build_layout_controls(root)
-        self._build_recorder_presentation()
-        self.update_controls()
 
     def _add_camera_panel(self, key, title, index):
         return camera_previews.add_camera_panel(self, key, title, index)
@@ -170,9 +199,42 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         controls = W.QWidget()
         rows = W.QVBoxLayout(controls)
         rows.setContentsMargins(0, 0, 0, 0)
+
+        self._build_transport_bar(rows)
+        view_menu = self._build_view_bar(rows)
+        root.layout().insertWidget(0, controls)
+        self.layout_controls = controls
+
+        self._setup_body_splitter()
+        self._wrap_secondary_tabs_with_scrollbars()
+        self._append_export_actions_to_menu(view_menu)
+
+        self._settings_visible = self.settings.value('layout/settings', True, type=bool)
+        self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence('Escape'), self)
+        self._escape_shortcut.activated.connect(self._escape_view)
+        self._apply_panel_visibility()
+
+    def _build_transport_bar(self, rows: W.QVBoxLayout):
         transport = W.QHBoxLayout()
-        for control in (self.record, self.stop, self.elapsed):
-            transport.addWidget(control)
+        transport.addWidget(self.record)
+        transport.addSpacing(10)
+        transport.addWidget(self.stop)
+        transport.addSpacing(14)
+        transport.addWidget(self.elapsed)
+        self.record.setToolTip('Start recording (F5 or Ctrl+R)')
+        self.stop.setToolTip('Stop active recording (Ctrl+Shift+S). Confirmation requested for takes > 5s.')
+        try:
+            self.stop.clicked.disconnect()
+        except Exception:
+            pass
+        self.stop.clicked.connect(self._handle_stop_clicked)
+        self._start_shortcut_f5 = QtGui.QShortcut(QtGui.QKeySequence('F5'), self)
+        self._start_shortcut_f5.activated.connect(self._shortcut_start)
+        self._start_shortcut_ctrl_r = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+R'), self)
+        self._start_shortcut_ctrl_r.activated.connect(self._shortcut_start)
+        self._stop_shortcut = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Shift+S'), self)
+        self._stop_shortcut.activated.connect(self._handle_stop_clicked)
+
         duration_layout = self.metrics_widget.layout().takeAt(0).layout()
         while duration_layout.count():
             item = duration_layout.takeAt(0)
@@ -185,14 +247,20 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         transport.addWidget(self.badge)
         transport.addStretch(1)
         rows.addLayout(transport)
+
+    def _build_view_bar(self, rows: W.QVBoxLayout) -> W.QMenu:
         views = W.QHBoxLayout()
         self.record_mode.setMinimumContentsLength(10)
         self.record_mode.setSizeAdjustPolicy(W.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        views.addWidget(self.record_mode, 1)
+        self.record_mode.setMinimumWidth(210)
+        self.record_mode.setMaximumWidth(280)
+        views.addWidget(self.record_mode)
+        views.addStretch(1)
         self.settings_button = button('Hide settings', self._toggle_settings)
         views.addWidget(self.settings_button)
         self.preview_button = button('Preview mode', self._toggle_preview_mode)
         views.addWidget(self.preview_button)
+
         view_button = W.QPushButton('View')
         menu = W.QMenu(view_button)
         self.options_action = menu.addAction('Camera options')
@@ -206,8 +274,9 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         view_button.setMenu(menu)
         views.addWidget(view_button)
         rows.addLayout(views)
-        root.layout().insertWidget(0, controls)
-        self.layout_controls = controls
+        return menu
+
+    def _setup_body_splitter(self):
         self.settings_scroll.setMinimumWidth(240)
         self.settings_scroll.setMaximumWidth(480)
         self.body_layout.removeWidget(self.settings_scroll)
@@ -222,8 +291,8 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         width = self.settings.value('layout/sidebar_width', 290, type=int)
         self.body_splitter.setSizes([max(240, min(480, width)), 900])
         self.body_splitter.splitterMoved.connect(self._save_sidebar_width)
-        # Inactive audio/review pages must not impose their wide toolbar size
-        # on the camera page. Their own scrollbars keep every control reachable.
+
+    def _wrap_secondary_tabs_with_scrollbars(self):
         for index in range(1, self.tabs.count()):
             page, title = self.tabs.widget(index), self.tabs.tabText(index)
             self.tabs.removeTab(index)
@@ -237,16 +306,18 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         self.tabs.tabBar().setExpanding(False)
         self.tabs.setStyleSheet('QTabBar::tab { padding: 6px 8px; }')
         self.footer_widget.hide()
-        # Export actions remain available through View without a wide footer.
+
+    def _append_export_actions_to_menu(self, menu: W.QMenu):
         menu.addSeparator()
         menu.addAction('Open last session', self.open_last)
         menu.addAction('Cage ROI export…', self.open_cage_roi)
+        menu.addAction('Multi-mouse thermal plot…', self.open_group_thermal_plot)
         menu.addAction('Export last session MP3', self.export_last)
         menu.addAction('Play last MP3', self.play_last)
-        self._settings_visible = self.settings.value('layout/settings', True, type=bool)
-        self._escape_shortcut = QtGui.QShortcut(QtGui.QKeySequence('Escape'), self)
-        self._escape_shortcut.activated.connect(self._escape_view)
-        self._apply_panel_visibility()
+
+    # -------------------------------------------------------------------------
+    # Screen and Visibility Management
+    # -------------------------------------------------------------------------
 
     def _fit_screen(self):
         area = self.screen().availableGeometry()
@@ -278,6 +349,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         self.tabs.tabBar().setVisible(not focus)
         self.preview_button.setText('Exit preview' if focus else 'Preview mode')
         self._refresh_presentation()
+        self._update_status_bar()
         self._reflow_timer.start(0)
 
     def _toggle_settings(self):
@@ -341,6 +413,10 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
     def _reflow_previews(self):
         return camera_previews.reflow_previews(self)
 
+    # -------------------------------------------------------------------------
+    # Mode and Options Synchronization
+    # -------------------------------------------------------------------------
+
     def _recording_options(self):
         index = self.record_mode.currentIndex()
         return dict(recording_mode={2: 'flir_mp4', 3: 'microphone_mp3', 4: 'seek_only'}.get(index, 'combined'),
@@ -366,6 +442,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         busy = controller.state != 'idle'
         locked = busy or controller.armed or self._closing
         connected = self.engine is not None
+
         self.record.setEnabled(controller.ready() and not busy and not self._closing)
         self.stop.setEnabled(controller.is_recording and not self._closing)
         for item in (self.mode, self.devices, self.refresh, self.serial_number, self.pre, self.auto_mp3):
@@ -375,27 +452,95 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         self.connect_button.setText('Working…' if self._mic_future else 'Disconnect mic' if connected else 'Connect & monitor')
         for item in (self.session_label, self.output, self.output_button):
             item.setEnabled(not locked and controller.run_dir is None)
-        self.arm.setEnabled(not self._closing and (controller.armed or
-                            (controller.ready() and not busy)))
+        self.arm.setEnabled(not self._closing and (controller.armed or (controller.ready() and not busy)))
         self.tcp_port.setEnabled(self.software_trigger is None and not self._closing)
         self.ports.setEnabled(self.serial_trigger is None and not self._closing)
+
         if hasattr(self, 'record_mode'):
-            self.record_mode.setEnabled(not locked)
-            combined = self.record_mode.currentIndex() in (0, 1, 4)
-            self.sample_mode.setEnabled(not locked and combined)
-            self.sample_hz.setEnabled(not locked and combined and self.sample_mode.currentIndex() == 0)
-            self.calibration.setEnabled(not locked and combined)
-            for item in (self.shutter_mode, self.shutter_hz, self.apply_shutter_button):
-                item.setEnabled(not locked)
-            self.retry_cameras.setEnabled(not controller.cameras_ready and not controller.connecting and
-                                         (controller.manager is None or controller.seek_ready) and not locked)
-            mp3_only = self.record_mode.currentIndex() == 3
-            self.pre.setEnabled(self.pre.isEnabled() and not mp3_only)
-            self.auto_mp3.setEnabled(self.auto_mp3.isEnabled() and not mp3_only)
-            if hasattr(self, 'audio_output_note'):
-                self.audio_output_note.setText('Normal-speed MP3 only. Conversion finishes after Stop.' if mp3_only else
-                                              'Original WAV + optional 10× slower MP3.\nWAV files split every 30 minutes (~720 MB).')
+            self._update_record_mode_controls(locked, controller)
+
         self._refresh_presentation()
+        self._update_status_bar()
+
+    def _update_record_mode_controls(self, locked: bool, controller: RecordingCoordinator):
+        self.record_mode.setEnabled(not locked)
+        combined = self.record_mode.currentIndex() in (0, 1, 4)
+        self.sample_mode.setEnabled(not locked and combined)
+        self.sample_hz.setEnabled(not locked and combined and self.sample_mode.currentIndex() == 0)
+        self.calibration.setEnabled(not locked and combined)
+        for item in (self.shutter_mode, self.shutter_hz, self.apply_shutter_button):
+            item.setEnabled(not locked)
+        self.retry_cameras.setEnabled(not controller.cameras_ready and not controller.connecting and
+                                     (controller.manager is None or controller.seek_ready) and not locked)
+        mp3_only = self.record_mode.currentIndex() == 3
+        self.pre.setEnabled(self.pre.isEnabled() and not mp3_only)
+        self.auto_mp3.setEnabled(self.auto_mp3.isEnabled() and not mp3_only)
+        if hasattr(self, 'audio_output_note'):
+            self.audio_output_note.setText('Normal-speed MP3 only. Conversion finishes after Stop.' if mp3_only else
+                                          'Original WAV + optional 10× slower MP3.\nWAV files split every 30 minutes (~720 MB).')
+
+    # -------------------------------------------------------------------------
+    # Transport and Shortcuts
+    # -------------------------------------------------------------------------
+
+    def _handle_stop_clicked(self):
+        if not self.controller.is_recording:
+            return
+        is_long_take = False
+        try:
+            if self.controller.take and self.controller.take.get('shared_start_monotonic_ns'):
+                elapsed_sec = (time.perf_counter_ns() - self.controller.take['shared_start_monotonic_ns']) / 1e9
+                is_long_take = elapsed_sec >= 5.0
+        except Exception:
+            pass
+
+        if is_long_take:
+            box = W.QMessageBox(self)
+            box.setWindowTitle('Stop Recording?')
+            box.setText(f'An active take is currently recording ({self.elapsed.text()} elapsed).\n\nDo you want to stop and save this take?')
+            box.setIcon(W.QMessageBox.Icon.Question)
+            stop_btn = box.addButton('Stop Take', W.QMessageBox.ButtonRole.AcceptRole)
+            cancel_btn = box.addButton('Keep Recording', W.QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(cancel_btn)
+            box.exec()
+            if box.clickedButton() != stop_btn:
+                return
+
+        self.command('STOP')
+
+    def _shortcut_start(self):
+        if self.record.isEnabled():
+            self.command('START')
+        elif self.controller.is_recording:
+            self.statusBar().showMessage('Recording is already running.', 3000)
+        else:
+            self.statusBar().showMessage('Cannot start recording: ' + getattr(self, 'readiness_label', W.QLabel()).text(), 4000)
+
+    def _update_status_bar(self):
+        if not hasattr(self, 'record_mode'):
+            return
+        ctl = self.controller
+        mode_text = self.record_mode.currentText()
+        if ctl.state == 'recording':
+            msg = f'Recording Take {ctl.take_number}  ·  {mode_text}  ·  Triggers {"armed" if ctl.armed else "disarmed"}'
+        elif ctl.state == 'starting':
+            msg = 'Starting recording: waiting for first device frames…'
+        elif ctl.state == 'finalizing':
+            msg = 'Finalizing take files: please wait…'
+        else:
+            mode_messages = {
+                'Cameras only': 'Cameras only mode active (Seek + FLIR). Microphone is not monitored.',
+                'Cameras + microphone': f'Synchronized cameras + ultrasonic bioacoustics  ·  {"Microphone connected" if self.engine else "Microphone not connected"}',
+                'Seek only': 'Seek thermal camera acquisition only.',
+                'FLIR only (.mp4)': 'FLIR optical camera acquisition only.',
+                'Microphone only (.mp3)': 'Ultrasonic microphone acquisition (WASAPI 200 kHz) with audible MP3 conversion.',
+            }
+            msg = mode_messages.get(mode_text, f'{mode_text} ready.')
+        self.statusBar().showMessage(msg)
+
+    # -------------------------------------------------------------------------
+    # Audio Connection Management
+    # -------------------------------------------------------------------------
 
     def toggle_connection(self):
         if self._mic_future is not None:
@@ -412,6 +557,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
                                  label=self.session_label.text(), serial=self.serial_number.text(),
                                  pre_seconds=self.pre.value(), auto_mp3=self.auto_mp3.isChecked(),
                                  device=dict(device), demo=demo)
+
         def connect():
             engine = SynchronizedAudioEngine(config)
             source = DemoSource(engine) if demo else create_input_source(engine, device)
@@ -423,6 +569,7 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
                 source.stop()
                 engine.close()
                 raise
+
         self._mic_action = 'connect'
         self._mic_future = self._mic_executor.submit(connect)
         self.update_controls()
@@ -434,9 +581,11 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
             self.log('Finish the current take before disconnecting the microphone.')
             return
         source, engine = self.source, self.engine
+
         def disconnect():
             source.stop()
             engine.close()
+
         self._mic_action = 'disconnect'
         self._mic_future = self._mic_executor.submit(disconnect)
         self.update_controls()
@@ -463,9 +612,14 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
             self.log(f'Microphone {action} failed: {exc}. Camera-only recording remains available.')
         self.update_controls()
 
+    # -------------------------------------------------------------------------
+    # Commands and Triggers
+    # -------------------------------------------------------------------------
+
     def command(self, command):
         request_ns = time.perf_counter_ns()
         if command == 'START' and self.controller.state == 'idle':
+            self._session_reset = False
             try:
                 self._sync_options()
             except Exception as exc:
@@ -532,6 +686,10 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
             self.ports.clear()
             self.ports.addItem('Serial support unavailable')
 
+    # -------------------------------------------------------------------------
+    # Camera Actions and Calibration
+    # -------------------------------------------------------------------------
+
     def _calibration_changed(self):
         if self.controller.state != 'idle':
             return
@@ -559,6 +717,10 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         except Exception as exc:
             self.error(str(exc))
 
+    # -------------------------------------------------------------------------
+    # Event Drainage and Periodic Tick
+    # -------------------------------------------------------------------------
+
     def drain_notices(self):
         if not self.engine:
             return
@@ -577,99 +739,29 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
                     self.controller.fault(notice['message'])
 
     def _handle_camera_events(self):
-        while True:
-            try:
-                event = self.core.ui_events.get_nowait()
-            except queue.Empty:
-                break
-            kind = event[0]
-            if kind == 'connected':
-                prefix = 'DEMO cameras · ' if getattr(self.core, 'demo', False) else ''
-                seek = 'Seek + ' if self.controller.seek_ready else ''
-                self.camera_status.setText(prefix + f'{seek}{len(event[1])} FLIR camera(s) connected')
-                for index, camera in enumerate(event[1], 1):
-                    key = f"flir_{camera['index']}"
-                    if key not in self._preview_labels:
-                        self._add_camera_panel(key, f"FLIR {camera['index']} · {camera['serial']}", index)
-                self.log(self.camera_status.text())
-            elif kind == 'connect_error':
-                self.camera_status.setText('Camera connection failed')
-                self._show_notice(event[1], 'error')
-                self.log(event[1])
-            elif kind == 'recording_pending':
-                self._audio_saved = None
-                self.log('Record requested: ' + self.record_mode.currentText())
-                self.settings.setValue('output', self.output.text())
-                self.settings.setValue('label', self.session_label.text())
-            elif kind == 'recording_started':
-                self.log('Recording selected streams.')
-            elif kind == 'recording_finalizing':
-                self.log('Stopping at the shared boundary and finishing files…')
-            elif kind == 'recording_saved':
-                self.drain_notices()
-                take = event[3]
-                self._last_result_take = take['take_id']
-                result = {'complete': 'Saved', 'complete_with_gaps': 'Saved with gaps', 'error': 'Failed'}.get(event[2], event[2])
-                self._last_result = f"Take {take['take_id']} · {result}"
-                self._export_status = ''
-                if event[2] != 'complete':
-                    self._show_notice(self._last_result + '. Check diagnostics and the take report.',
-                                      'error' if event[2] == 'error' else 'warning')
-                self.log(f"Take {take['take_id']}: {event[2]}. Folder: {event[1]}")
-                if take.get('recording_mode', 'combined') != 'combined':
-                    self.sync_summary.setText(f"Take {take['take_id']}: {event[2]}. Folder: {event[1]}")
-                    self.sync_summary.setToolTip('')
-                    if take.get('mp3_path'):
-                        self._last_mp3 = Path(event[1]) / take['mp3_path']
-                        self.last_session = None
-                        self.log(f'Normal-speed MP3 ready: {self._last_mp3}')
-                    for error in take['errors']:
-                        self.log(error)
-                    continue
-                parts = [f"{name}: {item['offset_from_seek_ns'] / 1e6:+.3f} ms" +
-                         (' (estimate)' if name == 'microphone' else '')
-                         for name, item in take['first_streams'].items()]
-                self.sync_summary.setText('First saved offsets from Seek — ' + ' | '.join(parts) +
-                                         f". Report: take{take['take_id']:02d}_sync.json")
-                self.sync_summary.setToolTip(take['timing_note'])
-                if event[2] == 'complete' and take.get('audio_path'):
-                    self.last_session = Path(event[1]) / take['audio_path']
-                    self._last_mp3 = None
-                    if event[4]:
-                        self.queue_export(self.last_session)
-            elif kind in ('camera_error', 'writer_error', 'seek_disconnected'):
-                message = event[1] if len(event) > 1 else 'Seek disconnected.'
-                self._show_notice(message, 'error')
-                mode = self.controller.options['recording_mode']
-                seek_error = kind == 'seek_disconnected' or str(message).startswith('Seek')
-                if kind == 'writer_error' or mode == 'combined' or (mode == 'flir_mp4' and not seek_error) or (mode == 'seek_only' and seek_error):
-                    self.controller.fault(str(message))
-                else:
-                    self.log(str(message))
-                if kind == 'seek_disconnected':
-                    self.controller.cameras_ready = False
-                    self.controller.seek_ready = False
-                    self.camera_status.setText('Seek disconnected · restart after reconnecting')
-            elif kind in ('message', 'writer_warning'):
-                self.log(event[1])
-                if kind == 'writer_warning':
-                    self._show_notice(event[1])
-            elif kind == 'seek_event':
-                self.log(f'Seek {event[2]}: {event[3]}')
-            elif kind == 'shutdown_complete':
-                self._cameras_closed = True
+        handle_camera_events(self)
 
     def _render_camera_previews(self):
         return camera_previews.render_camera_previews(self)
 
     def tick(self):
+        """Unified timer tick updating cameras, audio, clock calibrations, and take duration."""
         self._finish_mic_action()
         super().tick()
         self._handle_camera_events()
         self._render_camera_previews()
+
         self.arm.blockSignals(True)
         self.arm.setChecked(self.controller.armed)
         self.arm.blockSignals(False)
+
+        self._tick_badge_and_quality()
+        self._tick_clock_calibration()
+        self._tick_elapsed_duration()
+        self._tick_shutdown_completion()
+        self.update_controls()
+
+    def _tick_badge_and_quality(self):
         demo = getattr(self.core, 'demo', False) or bool(self.engine and self.engine.config.demo)
         self.badge.setText('CLOSING' if self._closing else ('DEMO · ' if demo else '') + self.controller.state.upper() +
                            ' · ' + self.record_mode.currentText().upper())
@@ -677,29 +769,38 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
             state = self.engine.snapshot()
             self.quality.setToolTip('Timestamp source: ' + str(state.get('timestamp_source', 'pending')) +
                                    '. Capture timestamps are estimates; see audio_timing.csv and the take report.')
+            if state['error'] and self.controller.is_recording and self.controller.options['microphone']:
+                self.controller.fault(state['error'])
         else:
             self.quality.setText('Cameras only')
             self.quality.setToolTip('Microphone disconnected; camera recording is available.')
+
+    def _tick_clock_calibration(self):
         if self.engine and self.source and time.monotonic() >= self._next_clock_check and not self._mic_future:
             self._next_clock_check = time.monotonic() + 1
             try:
                 calibrate_source_clock(self.source, self.engine)
             except Exception as exc:
                 self.engine.fault(f'Audio clock access failed: {exc}')
-        if self.engine and self.engine.snapshot()['error'] and self.controller.is_recording and self.controller.options['microphone']:
-            self.controller.fault(self.engine.snapshot()['error'])
+
+    def _tick_elapsed_duration(self):
         if self.controller.take and self.controller.take['shared_start_monotonic_ns'] is not None:
             take = self.controller.take
             end = take['shared_stop_monotonic_ns'] or time.perf_counter_ns()
             seconds = max(0, (end - take['shared_start_monotonic_ns']) / 1e9)
             self.elapsed.setText(f'{int(seconds) // 60:02d}:{seconds % 60:05.2f}')
+
+    def _tick_shutdown_completion(self):
         if self._closing and self._cameras_closed and self._mic_future is None:
             if self.engine:
                 self.disconnect()
             elif not self.exports and self.review_future is None:
                 self._shutdown_complete = True
                 self.close()
-        self.update_controls()
+
+    # -------------------------------------------------------------------------
+    # Dialogs and External Viewers
+    # -------------------------------------------------------------------------
 
     def set_review_file(self, path):
         super().set_review_file(path)
@@ -714,13 +815,34 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
         from ultramic_studio.recorder.roi.gui import RoiWindow
         if self._roi_window is None:
             self._roi_window = RoiWindow(self, coordinator=self.controller)
-            root = self.controller.run_dir
-            if (root and self.controller.state == 'idle' and self.controller.finished.is_set()
-                    and (root / 'seek_thermal.csv').is_file() and (root / 'seek_log.csv').is_file()):
+        root = self.controller.run_dir
+        if root and self.controller.state == 'idle' and (self._roi_window.root is None or Path(self._roi_window.root) != Path(root)):
+            is_seek = (root / 'seek_thermal.csv').is_file() and (root / 'seek_log.csv').is_file()
+            is_flir = bool(list(root.glob('flir_*.mp4')) or list((root / 'video_parts').glob('flir_*.mp4')) or list(root.glob('flir_log_*.csv')))
+            if is_seek or is_flir:
                 self._roi_window.load_recording(str(root))
         self._roi_window.show()
         self._roi_window.raise_()
         self._roi_window.activateWindow()
+
+    def open_group_thermal_plot(self):
+        """Configure and create a group plot without requiring connected cameras."""
+        from ultramic_studio.recorder.group_thermal_dialog import GroupThermalPlotDialog
+        from ultramic_studio.recorder.group_thermal_plot import create_group_plot
+        default_dir = self.controller.run_dir or Path(self.output.text()).expanduser()
+        dialog = GroupThermalPlotDialog(self, self.settings, default_dir)
+        if dialog.exec() != W.QDialog.DialogCode.Accepted or not dialog.result_data:
+            return
+        data = dialog.result_data
+        settings = {key: value for key, value in data.items()
+                    if key not in ('input_dir', 'groups')}
+        try:
+            output = create_group_plot(data['input_dir'], data['groups'], settings=settings)
+        except Exception as exc:
+            print(f'Multi-mouse thermal plot failed: {exc}', file=sys.stderr)
+            W.QMessageBox.warning(self, 'Multi-mouse thermal plot', str(exc))
+            return
+        W.QMessageBox.information(self, 'Multi-mouse thermal plot', f'Figure saved to:\n{output}')
 
     def play_last(self):
         if self._last_mp3 and self._last_mp3.exists():
@@ -733,6 +855,10 @@ class UnifiedWindow(RecorderPresentation, MainWindow):
             self.log(f'Normal-speed MP3 already saved: {self._last_mp3}')
         else:
             super().export_last()
+
+    # -------------------------------------------------------------------------
+    # Lifecycle
+    # -------------------------------------------------------------------------
 
     def closeEvent(self, event):
         if self._roi_window is not None and self._roi_window.thread is not None:

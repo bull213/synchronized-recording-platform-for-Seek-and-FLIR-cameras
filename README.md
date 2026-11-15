@@ -108,6 +108,11 @@ Seek saves thermal pixel data and timing information alongside its video
 preview. The image is illustrative; use the CSV and frame data from a recording
 for analysis.
 
+To create the three-panel 24-hour figure, pass one native Seek thermal CSV per
+mouse to the [portable figure tool](docs/SEEK_FIGURE_TOOL.md). It calculates a
+7×7 mean around each frame's hottest pixel and supports any number of mice and
+group labels.
+
 ## Cage ROI exporter
 
 In the combined recorder choose **View → Cage ROI export…**, or run

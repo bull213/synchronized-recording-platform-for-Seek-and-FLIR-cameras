@@ -1,4 +1,4 @@
-"""Native-pixel cage selection configuration and bounded-memory thermal exports."""
+"""Native-pixel cage selection configuration and bounded-memory thermal/FLIR exports."""
 from __future__ import annotations
 
 from contextlib import ExitStack
@@ -29,17 +29,18 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
-def source_identity(root):
+def source_identity(root, files=None):
     root = Path(root).resolve()
+    target_files = files if files is not None else ('seek_thermal.csv', 'seek_log.csv')
     return {'directory': str(root), 'files': {
         name: {'size': (root / name).stat().st_size, 'mtime_ns': (root / name).stat().st_mtime_ns}
-        for name in ('seek_thermal.csv', 'seek_log.csv')}}
+        for name in target_files if (root / name).is_file()}}
 
 
 def validate_cages(cages, shape):
     if not cages:
         raise ValueError('Add at least one cage.')
-    height, width = shape
+    height, width = shape[:2]
     names, boxes = set(), []
     for cage in cages:
         name = cage['mouse_id']
@@ -54,7 +55,7 @@ def validate_cages(cages, shape):
             raise ValueError('A cage must have integer x, y, width and height, with positive dimensions.')
         x, y, w, h = roi
         if x + w > width or y + h > height:
-            raise ValueError(f'{name}: cage extends outside the thermal image.')
+            raise ValueError(f'{name}: cage extends outside the image.')
         for a, b, c, d in boxes:
             if max(x, a) < min(x + w, a + c) and max(y, b) < min(y + h, b + d):
                 raise ValueError('Cage regions overlap. Give each mouse a separate region.')
@@ -62,18 +63,31 @@ def validate_cages(cages, shape):
         boxes.append(roi)
 
 
-def make_config(root, shape, cages):
+def make_config(root, shape, cages, stream_info=None):
     validate_cages(cages, shape)
-    return {'schema_version': 1, 'source': source_identity(root), 'shape': list(shape),
+    root = Path(root).resolve()
+    if stream_info is not None and getattr(stream_info, 'modality', None) == 'video':
+        from .video import snapshot_video_sources
+        ident = {'directory': str(root),
+                 'files': snapshot_video_sources(root, log_file=stream_info.log_file,
+                                                 video_files=stream_info.video_files,
+                                                 stream_name='FLIR')}
+        return {'schema_version': 1, 'source': ident, 'shape': list(shape[:2]),
+                'stream': stream_info.key, 'modality': 'flir_video',
+                'coordinates': 'native [x,y,width,height]; pixels[y:y+height,x:x+width]',
+                'cages': json.loads(json.dumps(cages))}
+    return {'schema_version': 1, 'source': source_identity(root), 'shape': list(shape[:2]),
             'coordinates': 'native [x,y,width,height]; pixels[y:y+height,x:x+width]',
             'cages': json.loads(json.dumps(cages))}
 
 
 def load_config(path, root, shape):
     config = json.loads(Path(path).read_text(encoding='utf-8-sig'))
-    if config.get('schema_version') != 1 or config.get('shape') != list(shape):
-        raise ValueError('Unsupported configuration or different thermal image dimensions.')
+    if config.get('schema_version') != 1 or config.get('shape') != list(shape[:2]):
+        raise ValueError('Unsupported configuration or different image dimensions.')
     validate_cages(config['cages'], shape)
+    if config.get('modality') == 'flir_video':
+        return config, False
     return config, config.get('source') != source_identity(root)
 
 
@@ -187,21 +201,106 @@ def colorize(pixels):
 
 def save_overview(path, pixels, cages):
     import cv2
-    image = cv2.cvtColor(colorize(pixels), cv2.COLOR_RGB2BGR)
-    image = cv2.resize(image, None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST)
+    if pixels.ndim == 2:
+        image = cv2.cvtColor(colorize(pixels), cv2.COLOR_RGB2BGR)
+    else:
+        image = cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)
+    scale = 3 if max(image.shape[:2]) <= 400 else 1
+    if scale != 1:
+        image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
     for i, cage in enumerate(cages):
         x, y, w, h = cage['roi']
         color = [(140, 240, 70), (60, 210, 255), (255, 170, 100)][i % 3]
-        cv2.rectangle(image, (x * 3, y * 3), ((x + w) * 3 - 1, (y + h) * 3 - 1), color, 2)
-        cv2.putText(image, cage['mouse_id'], (x * 3 + 3, y * 3 + 18), cv2.FONT_HERSHEY_SIMPLEX, .5, color, 1)
+        cv2.rectangle(image, (x * scale, y * scale), ((x + w) * scale - 1, (y + h) * scale - 1), color, 2)
+        cv2.putText(image, cage['mouse_id'], (x * scale + 3, y * scale + 18), cv2.FONT_HERSHEY_SIMPLEX, .5, color, 1)
     success, encoded = cv2.imencode('.png', image)
     if not success:
         raise OSError('Could not encode ROI overview.')
     Path(path).write_bytes(encoded.tobytes())
 
 
-def export_rois(root, config, output_parent, cancel=None, progress=None, max_frames=None, *, include_video=False):
+def export_flir_rois(root, config, output_parent, cancel=None, progress=None, max_frames=None, stream_info=None):
+    """Export cropped FLIR optical video parts for each cage ROI."""
+    root, output_parent = Path(root).resolve(), Path(output_parent).resolve()
+    cancel = cancel or threading.Event()
+    shape, cages = config['shape'], config['cages']
+    validate_cages(cages, shape)
+
+    output_parent.mkdir(parents=True, exist_ok=True)
+    out = output_parent / (datetime.now().strftime('roi_%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:8])
+    out.mkdir()
+
+    stream_key = getattr(stream_info, 'key', 'flir_cam0') if stream_info else 'flir_cam0'
+    log_file = getattr(stream_info, 'log_file', None) if stream_info else f'flir_log_{stream_key}.csv'
+    video_files = getattr(stream_info, 'video_files', None) if stream_info else None
+
+    from .video import snapshot_video_sources, export_video_parts
+
+    def check_cancel():
+        if cancel.is_set():
+            raise ExportCancelled('Export cancelled.')
+
+    video_sources_before = snapshot_video_sources(root, max_frames, check_cancel,
+                                                  log_file=log_file, video_files=video_files,
+                                                  stream_name='FLIR')
+
+    manifest = {'status': 'incomplete', 'source': {'directory': str(root), 'files': video_sources_before},
+                'config': config, 'scope': 'all_frames' if max_frames is None else 'sample',
+                'sample_limit': max_frames, 'modality': 'flir_video', 'stream': stream_key,
+                'outputs': []}
+    manifest_path = out / 'manifest.json'
+    atomic_json(manifest_path, manifest)
+    atomic_json(out / 'roi_config.json', config)
+
+    # Save overview image using first frame
+    if stream_info and hasattr(stream_info.first_frame, 'pixels'):
+        save_overview(out / 'roi_overview.png', stream_info.first_frame.pixels, cages)
+
+    started = time.monotonic()
+    try:
+        def video_progress(done, total):
+            if progress:
+                fraction = done / max(1, total)
+                elapsed = time.monotonic() - started
+                progress(done, fraction, elapsed * (1 / max(1e-6, fraction) - 1))
+
+        count = len(stream_info.previews) if stream_info and stream_info.previews else None
+        if max_frames is not None:
+            count = min(count or max_frames, max_frames)
+
+        video_outputs, video_sources, video_parts = export_video_parts(
+            root, out, cages, shape, count, check_cancel, video_sources_before,
+            video_progress, sample=max_frames is not None, log_file=log_file,
+            stream_name='FLIR', video_files=video_files
+        )
+
+        manifest.update(
+            status='complete',
+            elapsed_seconds=time.monotonic() - started,
+            frames=sum(p['frames'] for p in video_parts),
+            video_sources=video_sources,
+            video_parts=video_parts,
+            video_note='Color crops preserve native ROI; odd dimensions are padded on bottom/right.'
+        )
+        manifest['outputs'] += video_outputs
+        manifest['outputs'] += ['roi_config.json', 'roi_overview.png']
+        atomic_json(manifest_path, manifest)
+    except Exception as exc:
+        manifest.update(status='cancelled' if isinstance(exc, ExportCancelled) else 'incomplete', error=str(exc))
+        try:
+            atomic_json(manifest_path, manifest)
+        except OSError:
+            pass
+        raise
+    return out
+
+
+def export_rois(root, config, output_parent, cancel=None, progress=None, max_frames=None, *,
+                include_video=False, stream_info=None):
     """Export all frames by default; max_frames is an explicitly marked sample export."""
+    if config.get('modality') == 'flir_video' or (stream_info and getattr(stream_info, 'modality', None) == 'video'):
+        return export_flir_rois(root, config, output_parent, cancel, progress, max_frames, stream_info)
+
     root, output_parent = Path(root).resolve(), Path(output_parent).resolve()
     cancel = cancel or threading.Event()
     shape, cages = config['shape'], config['cages']
@@ -283,7 +382,7 @@ def export_rois(root, config, output_parent, cancel=None, progress=None, max_fra
             raise ValueError('Source files changed during export; results are incomplete.')
         if cancel.is_set():
             raise ExportCancelled('Export cancelled.')
-        if include_video:
+        if include_video and video_sources_before:
             from .video import export_video_parts
             def video_progress(done, total):
                 if progress:

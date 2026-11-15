@@ -6,6 +6,7 @@ documentation, examples, firmware, and tests alongside it.
 
 | Path | Purpose |
 | --- | --- |
+| `pyproject.toml` | Standard PEP 621 package specification, metadata, and CLI console scripts. |
 | `ultramic_studio/` | Standalone microphone app and combined recorder packages. |
 | `ultramic_studio/recorder/cameras/` | Seek and FLIR acquisition, SDK integration, and previews. |
 | `ultramic_studio/recorder/roi/` | Cage ROI selection, preview, storage, and export. |

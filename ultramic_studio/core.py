@@ -64,7 +64,7 @@ class AudioBlock:
 class RecordingConfig:
     output: Path
     label: str = "mouse"
-    serial: str = ""
+    serial: str = "681120"
     rate: int = 200_000
     pre_seconds: float = 0.5
     segment_seconds: int = 1800

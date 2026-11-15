@@ -146,3 +146,111 @@ def test_cage_export_guard_and_keyboard_labels_are_visible(window):
     assert win.stop.accessibleName() == 'Stop recording'
     assert win.trigger_status.accessibleName() == win.trigger_status.text()
     assert win._enlarge_buttons['seek'].accessibleName() == 'Enlarge Seek camera preview'
+
+
+def test_cohort_reset_and_hardening_controls(window):
+    app, win = window
+    assert hasattr(win, 'new_cohort_button')
+    assert hasattr(win, '_start_shortcut_f5')
+    assert hasattr(win, '_stop_shortcut')
+
+    # Initial state: no run dir, new cohort button hidden, inputs enabled
+    assert not win.new_cohort_button.isVisible()
+    assert win.session_label.isEnabled()
+    assert win.output.isEnabled()
+
+    # Simulate completed run
+    win.controller.run_dir = win.controller.options['output']
+    win.update_controls()
+    assert win.new_cohort_button.isVisible()
+    assert win.new_cohort_button.isEnabled()
+    assert not win.session_label.isEnabled()
+    assert 'fixed for this run' in win.lock_note.text()
+
+    # Click new cohort button to reset
+    win.new_cohort_button.click()
+    win.update_controls()
+    assert win.controller.run_dir is None
+    assert not win.new_cohort_button.isVisible()
+    assert win.session_label.isEnabled()
+    assert win.output.isEnabled()
+    assert 'Session finalized' in win.result_label.text()
+
+    # Test status bar updates across mode switches
+    win.record_mode.setCurrentIndex(0)
+    assert 'Cameras only' in win.statusBar().currentMessage()
+    win.record_mode.setCurrentIndex(1)
+    assert 'bioacoustics' in win.statusBar().currentMessage()
+
+
+def test_readiness_defensive_controller_states():
+    # Null controller
+    ready, msg, target = readiness(None, 'custom')
+    assert not ready and 'controller initialization' in msg
+
+    # Controller whose ready() raises unexpected driver exception
+    controller = state(ready=lambda: (_ for _ in ()).throw(RuntimeError('USB driver bus error')))
+    ready, msg, target = readiness(controller, 'custom')
+    assert not ready and 'USB driver bus error' in msg and target == 'devices'
+
+    # Controller with empty options dictionary
+    controller = state(options={})
+    ready, msg, target = readiness(controller, 'custom')
+    assert not ready
+
+    # Controller with missing shutter_settings
+    controller = state(shutter_settings=None)
+    ready, msg, target = readiness(controller, 'custom')
+    assert ready
+
+
+def test_presentation_hardening_edge_cases(window):
+    from ultramic_studio.recorder.ui.presentation import Section
+    app, win = window
+
+    # Section resilience without settings
+    section = Section('Diagnostic Section', None, 'diag_test', False)
+    assert 'collapsed' in section.toggle.accessibleName()
+    assert section.content.isHidden()
+    section.set_expanded(True)
+    assert 'expanded' in section.toggle.accessibleName()
+    assert not section.content.isHidden()
+
+    # Extreme length and multi-line notice
+    huge_notice = 'Line 1: Hardware error occurred\nLine 2: ' + ('data_overflow_' * 30)
+    win._show_notice(huge_notice, 'error')
+    win.update_controls()
+    # Clamped preview in label
+    assert '…' in win.readiness_label.text()
+    assert '\n' not in win.readiness_label.text()
+    # Full multi-line text retained in tooltip
+    assert win.readiness_label.toolTip() == huge_notice
+    assert win.dismiss_notice.isVisible()
+    win.dismiss_notice.click()
+    assert win.readiness_label.text() != huge_notice
+
+    # Unicode, emoji, RTL text in session label and notice
+    win.session_label.setText('🦇 Cohort Alpha (جلسة تجريبية)')
+    win._show_notice('🎙️ USB Audio Interface (كارت الصوت) disconnected')
+    win.update_controls()
+    assert '🦇 Cohort Alpha' in win.session_section.summary.text()
+    assert 'كارت الصوت' in win.readiness_label.text()
+    win.dismiss_notice.click()
+
+    # Status navigation with empty target
+    win._status_target = ''
+    win._show_status_target()  # Must not raise or crash
+
+    # Status navigation with 'session' target
+    win.session_section.toggle.setChecked(False)
+    win._status_target = 'session'
+    win._show_status_target()
+    assert win.session_section.toggle.isChecked()
+
+    # New cohort focuses session label
+    win.controller.run_dir = win.controller.options['output']
+    win.update_controls()
+    win.new_cohort_button.click()
+    assert win.focusWidget() is win.session_label
+
+

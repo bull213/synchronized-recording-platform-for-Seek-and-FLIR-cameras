@@ -76,6 +76,8 @@ QCheckBox::indicator:checked { background: #4c9aff; border-color: #9ccfff; image
 QCheckBox::indicator:disabled { border-color: #566170; background: #161b22; }
 QPushButton#record { padding: 9px 18px; }
 QPushButton#stop:enabled { background: #e6eaf0; color: #111923; }
+QPushButton#newCohort { background: #173127; border: 1px solid #27553f; color: #88e3ac; font-weight: bold; padding: 6px 10px; border-radius: 4px; }
+QPushButton#newCohort:hover:enabled { background: #1f3d32; border-color: #3b7558; }
 QPushButton#disclosure { text-align: left; background: #1b2531; border: none; }
 QLabel#sectionSummary { color: #acb9c9; padding: 2px 4px; }
 QLabel#deviceStatus { color: #b9c5d4; padding: 5px; background: #161f2a; border-radius: 4px; }

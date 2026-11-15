@@ -261,7 +261,7 @@ class MainWindow(W.QMainWindow):
         grid.addWidget(self.refresh)
         row = W.QHBoxLayout()
         row.addWidget(label("Mic serial"))
-        self.serial_number = W.QLineEdit("")
+        self.serial_number = W.QLineEdit("681120")
         self.serial_number.setToolTip("User-entered identifier, saved in metadata. The audio driver does not verify this serial number.")
         row.addWidget(self.serial_number)
         grid.addLayout(row)

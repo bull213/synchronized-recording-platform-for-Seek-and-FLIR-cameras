@@ -33,6 +33,7 @@ docs/PUBLISHING.md
 docs/PROJECT_STRUCTURE.md
 docs/RECORDER_GUI.md
 docs/SETUP.md
+docs/SEEK_FIGURE_TOOL.md
 docs/SYNCHRONIZATION.md
 docs/THIRD_PARTY.md
 docs/TRIGGERS.md
@@ -53,17 +54,20 @@ gui_theme.py
 launch.py
 launch_sync.py
 pytest.ini
+pyproject.toml
 recorder_setup.py
 recorder_ui.py
 recording_coordinator.py
 requirements-camera.txt
 requirements-dev.txt
 requirements-export.txt
+requirements-figure.txt
 requirements.txt
 scripts/build_portable.py
 scripts/build_sync_portable.py
 scripts/capture_demo_screenshots.py
 scripts/capture_recorder_redesign.py
+scripts/create_seek_group_figure.py
 scripts/package_source.py
 scripts/sync_runtime_hook.py
 seek_calibration.py
@@ -76,6 +80,7 @@ tests/test_camera_shutdown.py
 tests/test_failures_and_gui.py
 tests/test_independent_recording.py
 tests/test_laptop_layout.py
+tests/test_independent_cage_roi.py
 tests/test_portable_setup.py
 tests/test_recorder_presentation.py
 tests/test_seek_calibration.py
@@ -84,6 +89,7 @@ tests/test_shutter_capture.py
 tests/test_source_package.py
 tests/test_synchronized_recording.py
 tests/test_thermal_roi.py
+tests/test_group_thermal_plot.py
 tests/test_winmm.py
 thermal_roi.py
 thermal_roi_gui.py
@@ -116,8 +122,11 @@ ultramic_studio/recorder/roi/gui.py
 ultramic_studio/recorder/roi/storage.py
 ultramic_studio/recorder/roi/video.py
 ultramic_studio/recorder/storage.py
+ultramic_studio/recorder/group_thermal_plot.py
+ultramic_studio/recorder/group_thermal_dialog.py
 ultramic_studio/recorder/ui/__init__.py
 ultramic_studio/recorder/ui/presentation.py
+ultramic_studio/recorder/ui/events.py
 ultramic_studio/recorder/ui/window.py
 ultramic_studio/synchronized.py
 ultramic_studio/theme.py

@@ -616,6 +616,25 @@ class RecordingCoordinator(CameraHealth):
         self.take['stream_health'] = deepcopy(self.health)
         self.journal.checkpoint(deepcopy(self.take))
 
+    def reset_session(self):
+        """Finalize and close current session writer so the next take starts in a fresh folder/label."""
+        with self.lock:
+            if self.state != 'idle' or self.armed:
+                raise RuntimeError('Cannot reset session while recording or armed.')
+            if self.writer and self.writer.is_alive():
+                done = threading.Event()
+                self.core.save_q.put(('shutdown', done), timeout=5)
+                if not done.wait(30):
+                    raise RuntimeError('Previous camera writer did not close.')
+                self.writer.join(timeout=3)
+                if self.writer.is_alive():
+                    raise RuntimeError('Previous camera writer is still running.')
+            self.writer = None
+            self.run_dir = None
+            self._run_mode = None
+            self.take_number = 0
+            self.take = None
+
     def fault(self, message):
         log.error('Recording failure: %s', message)
         with self.lock:

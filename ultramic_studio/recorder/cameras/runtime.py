@@ -16,6 +16,10 @@ if TYPE_CHECKING:
 
 
 SEEK_LIBRARY = Path('camera_sdk') / 'seek' / 'seekcamera.dll'
+_SEEK_DEVELOPMENT_LIBRARIES = (
+    Path(r'C:\Seek\camera_program\Hot-Button-Camera\x64-windows\bin\seekcamera.dll'),
+    Path(r'C:\Seek\camera_program\Hot-Button-Camera\x64-windows\programs\build\Debug\seekcamera.dll'),
+)
 _FLIR_FRAME_RATE_HZ = 30.0
 _FLIR_EXPOSURE_US = 10000.0
 _FLIR_FRAME_TIMEOUT_MS = 500
@@ -100,7 +104,7 @@ class _FlirCameraRecord(TypedDict, total=False):
 
 
 def _seek_candidates() -> Iterator[Path]:
-    """Search bundled libraries and optional source-development exports."""
+    """Search bundled/local libraries before source-only development fallbacks."""
     app = application_folder()
     yield resource_folder() / SEEK_LIBRARY
     yield app / SEEK_LIBRARY
@@ -109,6 +113,7 @@ def _seek_candidates() -> Iterator[Path]:
         # Use the same SDK when launching from the IDE, CMD or desktop shortcut.
         yield from sorted((app / 'exports').glob(f'*/SyncRecorder/_internal/{SEEK_LIBRARY.as_posix()}'),
                           reverse=True)
+        yield from _SEEK_DEVELOPMENT_LIBRARIES
 
 
 def find_seek_dll() -> Path:

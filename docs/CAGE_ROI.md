@@ -1,12 +1,16 @@
-# Cage ROI thermal exporter
+# Cage ROI data exporter (Seek thermal & FLIR optical)
 
 In the camera recorder, choose **View → Cage ROI export…** to open the tool in a
 separate window. A finished current session is offered automatically; use **Open
 recording…** to choose another. The standalone **Start_Cage_ROI.cmd** launcher
 also remains available in the source project.
 
-1. Open a **finished recording folder** containing `seek_thermal.csv` and
-   `seek_log.csv`. The native thermal image appears immediately after the log is read.
+1. Open a **finished recording folder** containing Seek thermal data (`seek_thermal.csv`),
+   FLIR optical video (`flir_cam0*.mp4`), or both. The appropriate image appears immediately:
+   - For Seek: the calibrated native thermal image is loaded. If MP4 video parts are missing,
+     thermal-only mode is automatically engaged with video export safely disabled.
+   - For FLIR: the optical camera frame is loaded, and controls adapt to video cropping.
+   - For Combined: a stream selector allows switching between Seek thermal and FLIR camera views.
 2. Click **Add cage** and drag around one cage. Repeat for the other cage.
    Defaults are `WT_01`, `WT_02`, etc. Use **Rename / genotype** for other labels.
 3. Click a rectangle to select it. Drag inside to move it, drag a corner to resize,
@@ -15,20 +19,18 @@ also remains available in the source project.
    To create a cage without drawing, choose **Add cage** and apply its coordinates.
    Cage rectangles cannot overlap; valid edits require reviewing the boundaries again.
 4. Use the time slider and **Preview selected time** to inspect cage positions
-   later in the recording. This follows the log's video segment and frame index;
-   playback seconds are not used as acquisition timestamps. Export always uses
-   thermal pixels. **Native thermal frame** loads the calibrated thermal image at
-   the slider position. The first jump forward scans frame offsets in the large
-   source file; those offsets are cached for faster subsequent visits during the session.
+   later in the recording. If video parts are available, this follows the video frames.
+   If video parts are missing in a Seek recording, the slider seamlessly decodes
+   native thermal frames via the background cache. **Native thermal frame** loads
+   the calibrated thermal image at the slider position (for Seek streams).
    The cage thumbnail shows the entire ROI scaled down while preserving its shape;
    its caption reports the actual pixel dimensions. **Enlarge cage preview** opens
    a resizable view of the full crop. Display size does not change exported pixels.
 5. Check **Cage boundaries checked for this recording**. Optionally save the
    selections for reuse. Loading selections requires reviewing them again;
-   configurations with a different thermal resolution are rejected.
-6. Choose whether to **Export cropped Seek video**, click **Export pixels + temperatures**,
-   then choose a destination parent folder. Video is selected by default in the recorder.
-   Each export creates a new run folder and processes all frames and takes.
+   configurations with a different resolution are rejected.
+6. Choose whether to export cropped video, click **Export**, then choose a destination
+   parent folder. Each export creates a new run folder and processes all frames and takes.
 
 Finish the current take and disarm triggers before starting a cage export. While
 the export runs, starting or arming a recording is blocked. Opening and reviewing
