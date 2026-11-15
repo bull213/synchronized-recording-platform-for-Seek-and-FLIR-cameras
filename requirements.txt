@@ -1,4 +1,5 @@
 numpy==2.3.5
+opencv-python-headless==4.11.0.86
 PySide6==6.11.2
 pyqtgraph==0.14.0
 sounddevice==0.5.6
