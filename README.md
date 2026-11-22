@@ -47,11 +47,12 @@ The demo uses synthetic audio and does not need a microphone.
 
 ### Connect real devices
 
-Install the licensed Seek SDK and Windows driver for your camera, and the
-matching Teledyne Spinnaker SDK with its vendor PySpin wheel for FLIR cameras.
-The unrelated PyPI package named `pyspin` is not the FLIR SDK. Follow the
-[source setup and troubleshooting guide](docs/SETUP.md), then run
-`Start_Sync_Recorder.cmd`.
+The repository and exported ZIP include the camera drivers in `drivers/` and the Seek SDK library in `camera_sdk/seek/`:
+1. Right-click **`Install_Camera_Drivers.cmd` &rarr; Run as administrator** to register the Seek WinUSB (`seekusb.inf`) and FLIR USB3 drivers into the Windows DriverStore.
+2. If the Seek Thermal camera shows a warning in Windows Device Manager, right-click it &rarr; **Update driver &rarr; Browse my computer for drivers** &rarr; select `drivers\Seek`. See [Camera Drivers Guide](docs/CAMERA_DRIVERS.md).
+3. Connect the cameras and run **`Start_Sync_Recorder.cmd`**.
+
+For FLIR cameras in an editable Python environment, ensure the vendor Spinnaker PySpin wheel is installed. The unrelated PyPI package named `pyspin` is not the FLIR SDK. Follow the [source setup and troubleshooting guide](docs/SETUP.md).
 
 ## Installation and portable builds
 
@@ -61,10 +62,11 @@ recorder. The scripts create a local virtual environment and install pinned
 dependencies. An Internet connection is required during installation.
 
 To move the combined recorder to another Windows x64 PC, run
-`Export_Sync_Recorder.cmd` on a development PC with the licensed camera SDKs
-installed. Copy and extract the generated ZIP, run `Setup_New_PC.cmd`, then
-`Start_Sync_Recorder.cmd`. The transfer package includes its Python runtime and
-application libraries; vendor SDKs and drivers retain their own terms.
+`Export_Sync_Recorder.cmd` on a development PC with the camera SDKs
+installed (or use the pre-built `exports/SyncRecorder_Windows_x64.zip`). Copy and extract the ZIP, run `Setup_New_PC.cmd`, then
+`Start_Sync_Recorder.cmd`. The transfer package includes its standalone executable,
+application libraries, and complete camera drivers; vendor SDKs and drivers retain their own terms.
+See [camera drivers guide](docs/CAMERA_DRIVERS.md).
 
 See [setup](docs/SETUP.md) for real device requirements and
 [development](docs/DEVELOPMENT.md) for tests and local builds.
@@ -141,6 +143,7 @@ take's status and gap reports.
 - [Synchronization, saved files, and recovery](docs/SYNCHRONIZATION.md)
 - [Serial, localhost TCP, and Arduino TTL triggers](docs/TRIGGERS.md)
 - [Setup and troubleshooting](docs/SETUP.md)
+- [Camera drivers and Device Manager setup](docs/CAMERA_DRIVERS.md)
 - [Recorder interface guide](docs/RECORDER_GUI.md)
 - [Development and local builds](docs/DEVELOPMENT.md)
 - [Validation and hardware checks](docs/VALIDATION.md)

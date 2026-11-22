@@ -6,23 +6,45 @@ if not exist "SyncRecorder.exe" (
     pause
     exit /b 1
 )
-echo Checking software libraries. These checks do not record from your devices.
+echo ===============================================================================
+echo Seek / FLIR / Ultramic Recorder - Setup Check
+echo ===============================================================================
+echo.
+echo [1/2] Checking software libraries and runtime dependencies...
 "SyncRecorder.exe" --check-setup --report setup_report.txt
 if errorlevel 1 goto failed
 echo.
-echo Testing recording and export with synthetic cameras and audio.
+echo [2/2] Running synthetic recorder self-test (cameras + audio)...
 "SyncRecorder.exe" --self-test --report self_test_report.txt
 if errorlevel 1 goto failed
+
 echo.
-echo Software setup passed. No Python installation or package downloads are needed.
-echo Connect the cameras and double-click Start_Sync_Recorder.cmd.
-echo If the cameras are not detected, run Install_Camera_Drivers.cmd as administrator once.
-echo The microphone is optional; Cameras only is the default.
+echo ===============================================================================
+echo Software Setup Check Passed!
+echo ===============================================================================
+echo No Python installation or external package downloads are needed.
+echo.
+echo CAMERA DRIVERS:
+echo   - If your cameras are connected and detected, launch Start_Sync_Recorder.cmd.
+echo   - If cameras are NOT detected:
+echo       1. Right-click Install_Camera_Drivers.cmd and select "Run as administrator".
+echo       2. If Windows Device Manager still shows a warning on Seek Thermal Camera,
+echo          right-click it in Device Manager, choose "Update driver", and browse to:
+echo          "%~dp0drivers\Seek"
+echo.
+echo For detailed instructions, refer to docs\CAMERA_DRIVERS.md and START_SYNC_HERE.html.
+echo ===============================================================================
+echo.
 pause
 exit /b 0
+
 :failed
 echo.
-echo A check failed. See the messages above and setup_report.txt / self_test_report.txt.
-echo Keep SyncRecorder.exe and its entire _internal folder together.
+echo ===============================================================================
+echo [ERROR] Setup check failed.
+echo ===============================================================================
+echo Review the error messages above and check setup_report.txt / self_test_report.txt.
+echo Ensure SyncRecorder.exe and its complete _internal folder are in the same folder.
+echo.
 pause
 exit /b 1

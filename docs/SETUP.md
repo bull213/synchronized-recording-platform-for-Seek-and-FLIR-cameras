@@ -42,34 +42,14 @@ Keep recordings outside your checkout and maintain a separate backup.
 
 ## Real Seek / FLIR cameras
 
-1. Obtain the appropriate **licensed Seek SDK and Windows driver** for your camera.
-2. Install the matching **Teledyne Spinnaker SDK** and its **vendor PySpin wheel**
-   for Windows x64 / Python 3.12. Use the vendor's installation instructions.
-   Install a local wheel with `.venv\Scripts\python.exe -m pip install "PATH_TO_VENDOR_WHEEL.whl"`.
-3. Point the app at your Seek DLL in the same terminal before launching:
+1. **Camera Drivers**: The repository bundles both Seek WinUSB drivers (`drivers/Seek/seekusb.inf`) and FLIR USB3 drivers (`drivers/FLIR_USB3/PGRUSBCam3.inf`).
+   - Right-click `Install_Camera_Drivers.cmd` and select **Run as administrator** once.
+   - If Windows Device Manager still shows a warning on the Seek Thermal Camera, right-click it, choose **Update driver &rarr; Browse my computer for drivers**, and select the `drivers\Seek` directory. See [Camera Drivers Guide](CAMERA_DRIVERS.md).
+2. **Seek SDK**: The Seek SDK library is bundled in `camera_sdk/seek/seekcamera.dll`. If using an external SDK installation, you can optionally override it via `set SYNC_SEEK_DLL=C:\path\to\seekcamera.dll`.
+3. **FLIR Spinnaker / PySpin**: For Python source development, install the matching **Teledyne Spinnaker SDK** and its **vendor PySpin wheel** for Windows x64 / Python 3.12 (`.venv\Scripts\python.exe -m pip install "PATH_TO_VENDOR_WHEEL.whl"`). If using the exported standalone Windows bundle (`SyncRecorder.exe`), PySpin is pre-compiled and no external wheel installation is required.
+4. Verify FLIR detection using SpinView or `Start_Sync_Recorder.cmd --check-setup`.
 
-```bat
-set "SYNC_SEEK_DLL=C:\path\to\licensed-sdk\seekcamera.dll"
-Start_Sync_Recorder.cmd
-```
-
-In PowerShell use `$env:SYNC_SEEK_DLL = 'C:\path\to\licensed-sdk\seekcamera.dll'`.
-An explicit invalid path fails rather than falling back to another SDK.
-
-The app also searches `camera_sdk/seek/seekcamera.dll`, then an application-root
-`seekcamera.dll`. Frozen apps search their bundled resources first; source runs
-can also find SDKs in locally generated transfer bundles under `exports/`.
-All these binary locations are ignored by Git. There are no developer-PC absolute
-path fallbacks. SDK dependencies and drivers must also be installed or available
-as required by their vendor.
-
-Verify FLIR detection using SpinView. GigE models may need different drivers and
-network configuration. The source distribution contains no camera driver packages.
-`Install_Camera_Drivers.cmd` is for a separately built local transfer bundle with
-licensed drivers; it is not a source dependency installer.
-
-`Start_Sync_Recorder.cmd --check-setup` diagnoses installed libraries and enumerates
-devices. `--self-test` uses only synthetic cameras and audio and needs no SDKs.
+`Start_Sync_Recorder.cmd --check-setup` diagnoses installed libraries and enumerates devices. `--self-test` uses synthetic cameras and audio and needs no hardware.
 
 ## Calibration
 

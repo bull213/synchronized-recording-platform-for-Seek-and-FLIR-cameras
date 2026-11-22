@@ -17,10 +17,10 @@ build/
 dist/
 exports/
 github-upload/
-camera_sdk/
-drivers/
 _internal/
 *.dll
+!camera_sdk/seek/seekcamera.dll
+!drivers/FLIR_USB3/WdfCoInstaller01009.dll
 *.pyd
 *.exe
 *.whl

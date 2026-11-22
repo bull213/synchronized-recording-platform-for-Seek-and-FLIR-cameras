@@ -19,8 +19,9 @@ Open its <code>SyncRecorder</code> folder. Keep <code>_internal</code> beside <c
 It checks the libraries and makes a short synthetic recording. It does not open your microphone or start camera acquisition.</li>
 <li>Connect/power the Seek and FLIR cameras. If they are not detected,
 right-click <a href="Install_Camera_Drivers.cmd"><code>Install_Camera_Drivers.cmd</code></a>
-and choose <strong>Run as administrator</strong> once. It adds the included Seek and FLIR USB3 drivers.
-Then reconnect the cameras and repeat the setup check.</li>
+and choose <strong>Run as administrator</strong> once. It adds the bundled Seek (<code>seekusb.inf</code>) and FLIR USB3 drivers.
+If Windows Device Manager still shows a warning on Seek Thermal Camera, right-click it in Device Manager &rarr; <em>Update driver</em> &rarr; <em>Browse my computer for drivers</em> &rarr; choose <code>drivers\Seek</code>.
+Then reconnect the cameras and repeat the setup check. See <a href="docs/CAMERA_DRIVERS.md"><code>docs/CAMERA_DRIVERS.md</code></a>.</li>
 <li>Double-click <a href="Start_Sync_Recorder.cmd"><code>Start_Sync_Recorder.cmd</code></a> to record.</li>
 </ol></div>
 <h2>Choose what to record</h2>
@@ -34,7 +35,7 @@ actions, and includes <strong>Reset layout</strong>. Panel choices and sidebar w
 The window fits the available screen; scrollbars keep settings accessible at larger Windows scaling.</p>
 <p><strong>Cameras only</strong> is the default and works without a microphone.
 For audio, choose <strong>Cameras + microphone</strong>, choose the Ultramic input,
-and click <strong>Connect &amp; monitor</strong> before Record.
+and click <strong>Connect &amp; monitor</strong> before Record. WASAPI is the capture path tested on the development PC.
 Choose an existing recording folder and a session label.</p>
 <p>Record waits for the first fresh valid Seek frame. Camera CSVs and each
 <code>takeNN_sync.json</code> report show start offsets. The microphone timestamps are estimates;
@@ -44,10 +45,9 @@ physical simultaneity needs a connected-device bench measurement. Pre-trigger au
 Press Record and Stop to try the camera previews, spectrogram, WAV review, and MP3 export.
 Demo recordings are marked DEMO.</p>
 <h2>If a camera is still missing</h2>
-<p>The driver script targets FLIR <strong>USB3</strong> cameras. For GigE cameras or a driver Windows rejects,
-install the appropriate <a href="https://www.teledynevisionsolutions.com/products/spinnaker-sdk/">Teledyne Spinnaker SDK</a>
-and verify the camera in SpinView. For Seek, use your licensed Seek SDK's Windows driver package.
-The Ultramic normally appears as a Windows audio input; it remains optional.</p>
+<p>Both Seek WinUSB (<code>drivers/Seek/seekusb.inf</code>) and FLIR USB3 (<code>drivers/FLIR_USB3/PGRUSBCam3.inf</code>) drivers are bundled in the <code>drivers/</code> folder.
+If Windows does not automatically recognize the camera, open Device Manager (<code>devmgmt.msc</code>), right-click the camera, select <strong>Update driver &rarr; Browse my computer for drivers</strong>, and point to the appropriate driver folder. For complete instructions, see <a href="docs/CAMERA_DRIVERS.md"><code>docs/CAMERA_DRIVERS.md</code></a>.
+For GigE cameras or specialized setups, install the appropriate <a href="https://www.teledynevisionsolutions.com/products/spinnaker-sdk/">Teledyne Spinnaker SDK</a> and verify the camera in SpinView. The Ultramic normally appears as a Windows audio input; it remains optional.</p>
 <p>Read <code>setup_report.txt</code>, <code>self_test_report.txt</code>, or <code>driver_install.log</code>
 for the exact error. Do not copy only the EXE or run it inside the ZIP.</p>
 <h2>Export after editing the program</h2>

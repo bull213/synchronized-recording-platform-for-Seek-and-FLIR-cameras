@@ -429,3 +429,82 @@ def test_import_cage_roi_auto_populates_groups(tmp_path):
 
     dialog.close()
     app.processEvents()
+
+
+def test_midday_start_48h_linear_alignment_marks_missing_as_nan(tmp_path):
+    """Ensure multi-day or non-folded tests starting mid-day anchor to start_time on test day
+
+    and mark unrecorded lead-in as NaN without cuts or modulo wrapping.
+    """
+    # Recording starts at 10:20:00 on Nov 10, 2026 local (Asia/Jerusalem is UTC+2)
+    # 10:20 local = 08:20 UTC
+    start_utc = pd.Timestamp('2026-11-10 08:20:00', tz='UTC')
+    # 48 hours with 1-second intervals
+    times = pd.date_range(start_utc, periods=48 * 3600, freq='1s')
+    # Synthetic temp: constant 25.0 C, with a sharp drop at hour 32 to 18.0 C
+    temps = np.full(len(times), 25.0)
+    # hour 32 relative to 07:00 Nov 10 = Nov 11 15:00 local (13:00 UTC)
+    drop_mask = times >= pd.Timestamp('2026-11-11 13:00:00', tz='UTC')
+    temps[drop_mask] = 18.0
+
+    csv_path = tmp_path / 'mouse_48h.csv'
+    df = pd.DataFrame({
+        'timestamp_utc_iso': times.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'temperature_c': temps,
+        'mouse_id': 'WT_01',
+    })
+    df.to_csv(csv_path, index=False)
+
+    # 1. Test align_mouse_data directly
+    loaded_df = load_mouse_csv(csv_path, DEFAULT_PLOT_SETTINGS)
+    sec, aligned_temps, start_ts = align_mouse_data(
+        loaded_df,
+        start_time='07:00',
+        window_hours=48.0,
+        timezone_name='Asia/Jerusalem',
+    )
+
+    # Check anchor start_ts
+    assert start_ts.year == 2026
+    assert start_ts.month == 11
+    assert start_ts.day == 10
+    assert start_ts.hour == 7
+    assert start_ts.minute == 0
+
+    # First recorded point is at 10:20:00, exactly 3h20m = 12000s after 07:00
+    assert sec[0] == 12000.0
+    # Times are strictly monotonic (no phase folding / cuts)
+    assert np.all(np.diff(sec) > 0)
+    # The drop happens at sec >= (32 * 3600)
+    drop_indices = np.where(aligned_temps == 18.0)[0]
+    assert sec[drop_indices[0]] == 32 * 3600
+
+    # 2. Test one_second_grid has NaNs for the missing 0..11999 seconds
+    grid = one_second_grid(sec, aligned_temps, duration=48 * 3600)
+    assert len(grid) == 48 * 3600
+    assert grid['temperature_c'].iloc[:12000].isna().all()
+    assert not grid['temperature_c'].iloc[12000:].isna().all()
+
+    # 3. Test full pipeline compute_group_analysis & draw_group_figure
+    cfg = dict(DEFAULT_PLOT_SETTINGS)
+    cfg['START_TIME'] = '07:00'
+    cfg['TIME_WINDOW_HOURS'] = 48.0
+    cfg['TIMEZONE'] = 'Asia/Jerusalem'
+    cfg['OUTPUT_DIR'] = str(tmp_path)
+
+    results = compute_group_analysis(
+        tmp_path,
+        {'WT': [csv_path]},
+        settings=cfg,
+    )
+    fig = draw_group_figure(results)
+    assert fig is not None
+    # Verify the first few bins in extracted timeseries are NaN
+    data_df = results['data']
+    mouse_data = data_df[data_df['animal'] == 'WT_01']
+    assert mouse_data['absolute_temperature_c'].iloc[:6].isna().all()
+    # At hour 4 (bin index 8 for 30m bins), temperature is valid ~25.0
+    assert np.isclose(mouse_data['absolute_temperature_c'].iloc[8], 25.0)
+    # At hour 33 (bin index 66 for 30m bins), temperature is valid ~18.0
+    assert np.isclose(mouse_data['absolute_temperature_c'].iloc[66], 18.0)
+

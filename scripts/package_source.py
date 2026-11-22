@@ -8,7 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {'.git', '.venv', '.idea', '.validation', '__pycache__', 'runtime',
-                  'build', 'dist', 'exports', 'recordings', 'camera_sdk', 'drivers',
+                  'build', 'dist', 'exports', 'recordings',
                   'pretrained_models', 'mouse_thermal_results', 'github-upload'}
 EXCLUDED_SUFFIXES = {'.pyc', '.pyd', '.dll', '.exe', '.whl', '.zip', '.wav', '.mp3',
                      '.mp4', '.avi', '.mkv', '.csv', '.jsonl', '.pem', '.key', '.pdf'}
@@ -31,8 +31,10 @@ def source_files(source=ROOT):
         if name.casefold() in seen:
             raise ValueError(f'Duplicate manifest path: {name}')
         seen.add(name.casefold())
+        is_allowed_binary = (relative.as_posix() == 'camera_sdk/seek/seekcamera.dll' or
+                             relative.as_posix() == 'drivers/FLIR_USB3/WdfCoInstaller01009.dll')
         if (any(part.casefold() in EXCLUDED_PARTS for part in relative.parts) or
-                relative.suffix.lower() in EXCLUDED_SUFFIXES or
+                (relative.suffix.lower() in EXCLUDED_SUFFIXES and not is_allowed_binary) or
                 relative.name.lower().startswith('.env')):
             raise ValueError(f'Private/generated file is not permitted in source: {name}')
         path = source.joinpath(*relative.parts)
@@ -53,7 +55,7 @@ def source_files(source=ROOT):
     return files
 
 
-def package_source(output, source=ROOT):
+def package_source(output, source=ROOT, overwrite=False):
     source = Path(source).resolve()
     output = Path(output).resolve()
     checksum_path = output.with_suffix(output.suffix + '.sha256')
@@ -62,10 +64,13 @@ def package_source(output, source=ROOT):
     if output.suffix.lower() != '.zip':
         raise ValueError('The source archive must end in .zip.')
     files = source_files(source)
-    if output.exists() or checksum_path.exists():
+    if not overwrite and (output.exists() or checksum_path.exists()):
         raise FileExistsError('Choose a new archive name; existing exports are never replaced.')
+    if output.exists():
+        output.unlink()
+    if checksum_path.exists():
+        checksum_path.unlink()
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Exclusive creation also protects against a concurrent export with this name.
     with ZipFile(output, 'x', ZIP_DEFLATED, compresslevel=9) as archive:
         for name, path in files:
             archive.write(path, f'UltramicStudio/{name}')
@@ -84,12 +89,13 @@ def main():
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--check', action='store_true', help='Validate the reviewed inventory')
     action.add_argument('--output', type=Path, help='New ZIP path outside the source folder')
+    parser.add_argument('--overwrite', action='store_true', help='Allow replacing existing export')
     args = parser.parse_args()
     if args.check:
         files = source_files()
         print(f'Approved source inventory: {len(files)} files, {sum(p.stat().st_size for _, p in files):,} bytes')
     else:
-        count, digest = package_source(args.output)
+        count, digest = package_source(args.output, overwrite=args.overwrite)
         print(f'Source archive: {args.output}\nFiles: {count}\nSHA256: {digest}')
 
 

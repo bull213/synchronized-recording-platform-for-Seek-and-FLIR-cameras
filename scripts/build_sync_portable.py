@@ -42,6 +42,10 @@ def copy_editable_source(destination, source=SOURCE):
     for name in ('ultramic_studio', 'docs'):
         shutil.copytree(source / name, destination / name,
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    for name in ('drivers', 'camera_sdk'):
+        if (source / name).is_dir():
+            shutil.copytree(source / name, destination / name,
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     (destination / 'scripts').mkdir()
     for name in ('build_sync_portable.py', 'sync_runtime_hook.py'):
         shutil.copy2(source / 'scripts' / name, destination / 'scripts' / name)
@@ -111,11 +115,22 @@ def main():
     seek = find_seek_dll()
     seek_driver = args.seek_driver
     if seek_driver is None:
-        seek_driver = next((p / 'driver' for p in seek.parents if (p / 'driver' / 'seekusb.inf').is_file()), None)
+        candidates = [
+            SOURCE / 'drivers' / 'Seek',
+            Path(r'C:\Seek\camera_driver'),
+            *(p / 'driver' for p in seek.parents),
+        ]
+        seek_driver = next((p for p in candidates if (p / 'seekusb.inf').is_file() and (p / 'seekusb.cat').is_file()), None)
     if seek_driver is None or not (seek_driver / 'seekusb.cat').is_file():
         raise RuntimeError('Seek driver package not found. Pass --seek-driver with the licensed SDK driver folder.')
     required_flir = ('PGRUSBCam3.inf', 'pgrusbcam3.cat', 'PGRUSBCam3.sys', 'WdfCoInstaller01009.dll')
-    if any(not (args.flir_driver / name).is_file() for name in required_flir):
+    flir_candidates = [
+        args.flir_driver,
+        SOURCE / 'drivers' / 'FLIR_USB3',
+        Path(r'C:\Program Files\Teledyne\Spinnaker\driver64\PGRUsb3'),
+    ]
+    resolved_flir = next((p for p in flir_candidates if p and all((p / name).is_file() for name in required_flir)), None)
+    if resolved_flir is None:
         raise RuntimeError('FLIR USB3 driver package not found. Pass --flir-driver with its installed SDK folder.')
     versions = {name: importlib.metadata.version(name) for name in PACKAGES}
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:6]
@@ -171,7 +186,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name='SyncRecorder', strip=False, upx=F
         shutil.copy2(SOURCE / name, folder / name)
     shutil.copytree(SOURCE / 'docs', folder / 'docs', ignore=shutil.ignore_patterns('__pycache__'))
     shutil.copytree(seek_driver, folder / 'drivers' / 'Seek')
-    shutil.copytree(args.flir_driver, folder / 'drivers' / 'FLIR_USB3')
+    shutil.copytree(resolved_flir, folder / 'drivers' / 'FLIR_USB3')
     copy_editable_source(folder / 'source')
     licenses = folder / 'licenses'
     licenses.mkdir()
@@ -207,7 +222,10 @@ coll = COLLECT(exe, a.binaries, a.datas, name='SyncRecorder', strip=False, upx=F
     checksum = digest(archive)
     archive.with_suffix('.zip.sha256').write_text(f'{checksum}  {archive.name}\n', encoding='ascii')
     (args.output_root / 'LATEST_EXPORT.txt').write_text(str(archive) + '\n', encoding='utf-8')
-    print(f'EXPORT READY: {archive}\nSize: {archive.stat().st_size / 1_000_000:.1f} MB\nSHA256: {checksum}', flush=True)
+    canonical = args.output_root / 'SyncRecorder_Windows_x64.zip'
+    shutil.copy2(archive, canonical)
+    canonical.with_suffix('.zip.sha256').write_text(f'{checksum}  {canonical.name}\n', encoding='ascii')
+    print(f'EXPORT READY: {archive}\nCanonical: {canonical}\nSize: {archive.stat().st_size / 1_000_000:.1f} MB\nSHA256: {checksum}', flush=True)
 
 
 if __name__ == '__main__':

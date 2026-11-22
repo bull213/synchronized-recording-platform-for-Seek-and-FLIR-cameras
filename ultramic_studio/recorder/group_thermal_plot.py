@@ -70,8 +70,10 @@ class MouseTrace:
     mouse_id: str = ''
 
 
-def parse_time_str(val: str | dt_time | int | float) -> dt_time:
+def parse_time_str(val: str | dt_time | int | float | None) -> dt_time | None:
     """Parse time string 'HH:MM' or 'HH:MM:SS', integer hour, or datetime.time."""
+    if val is None:
+        return None
     if isinstance(val, dt_time):
         return val
     if isinstance(val, (int, float)):
@@ -79,6 +81,8 @@ def parse_time_str(val: str | dt_time | int | float) -> dt_time:
         m = int(round((val - int(val)) * 60)) % 60
         return dt_time(h, m)
     val_str = str(val).strip()
+    if val_str.lower() in ('recording', 'start', 'first', 'none', ''):
+        return None
     parts = val_str.split(':')
     if len(parts) == 1:
         return dt_time(int(parts[0]) % 24, 0)
@@ -339,24 +343,41 @@ def one_second_grid(seconds: np.ndarray, temperatures: np.ndarray, duration: int
 
 def align_mouse_data(
     df: pd.DataFrame,
-    start_time: str | dt_time,
+    start_time: str | dt_time | None,
     window_hours: float,
     timezone_name: str,
+    allow_phase_folding: bool | None = None,
 ) -> tuple[np.ndarray, np.ndarray, pd.Timestamp]:
     """Align mouse timestamps so Time 0 starts at the specified start clock time.
 
+    If start_time is None or 'recording'/'start', Time 0 anchors to the first frame of the recording.
     If a continuous window of `window_hours` starting at `start_time` is present,
-    it is extracted. If the recording is shorter or started mid-day, circadian phase
-    folding modulo 24h is applied relative to `start_time`.
+    it is extracted. If the recording started mid-day and window_hours > 24, Time 0 is
+    anchored to `start_time` on the same calendar day as the recording start without cuts;
+    any unrecorded periods remain missing data (NaN).
+    For <= 24h single-cycle analysis, circadian phase folding modulo 24h is permitted
+    only when allow_phase_folding is True.
     """
     zone = ZoneInfo(timezone_name)
-    target_time = parse_time_str(start_time)
-    target_sec = target_time.hour * 3600 + target_time.minute * 60 + target_time.second
     duration_s = int(round(window_hours * 3600))
-
     times_local = df.datetime_utc.dt.tz_convert(zone)
     earliest = times_local.iloc[0]
     latest = times_local.iloc[-1]
+
+    is_rec_start = (
+        start_time is None
+        or (isinstance(start_time, str) and start_time.strip().lower() in ('recording', 'start', 'first', 'none', ''))
+    )
+    if is_rec_start:
+        start_ts = earliest
+        end_ts = start_ts + pd.Timedelta(seconds=duration_s)
+        selected = (times_local >= start_ts) & (times_local < end_ts)
+        sec = (times_local[selected] - start_ts).dt.total_seconds().to_numpy()
+        temp = df.loc[selected, 'temperature_c'].to_numpy()
+        return sec, temp, start_ts
+
+    target_time = parse_time_str(start_time)
+    target_sec = target_time.hour * 3600 + target_time.minute * 60 + target_time.second
 
     # Look for candidate calendar days where target_time falls within recording
     candidates = []
@@ -367,7 +388,10 @@ def align_mouse_data(
             hour=target_time.hour, minute=target_time.minute, second=target_time.second,
             tz=zone
         )
-        if cand >= earliest and cand + pd.Timedelta(seconds=duration_s) <= latest + pd.Timedelta(seconds=120):
+        if cand <= earliest and (earliest - cand).total_seconds() <= 60:
+            if earliest + pd.Timedelta(seconds=duration_s) <= latest + pd.Timedelta(seconds=120):
+                candidates.append(earliest)
+        elif cand >= earliest and cand + pd.Timedelta(seconds=duration_s) <= latest + pd.Timedelta(seconds=120):
             candidates.append(cand)
         current_date += timedelta(days=1)
 
@@ -380,7 +404,23 @@ def align_mouse_data(
         temp = df.loc[selected, 'temperature_c'].to_numpy()
         return sec, temp, start_ts
 
-    # Fallback to circadian phase folding relative to target start time
+    # For multi-day windows (> 24 hours) or when phase folding is not explicitly enabled,
+    # never make cuts or fold modulo 24h. Take the window starting from target_time on the
+    # same calendar day as the recording start. Any unrecorded periods remain missing data (NaN).
+    should_fold = allow_phase_folding if allow_phase_folding is not None else (window_hours <= 24)
+    if not should_fold or window_hours > 24:
+        start_ts = pd.Timestamp(
+            year=earliest.year, month=earliest.month, day=earliest.day,
+            hour=target_time.hour, minute=target_time.minute, second=target_time.second,
+            tz=zone
+        )
+        end_ts = start_ts + pd.Timedelta(seconds=duration_s)
+        selected = (times_local >= start_ts) & (times_local < end_ts)
+        sec = (times_local[selected] - start_ts).dt.total_seconds().to_numpy()
+        temp = df.loc[selected, 'temperature_c'].to_numpy()
+        return sec, temp, start_ts
+
+    # Fallback to circadian phase folding relative to target start time for <= 24h single-cycle analysis
     start_ts = pd.Timestamp(
         year=earliest.year, month=earliest.month, day=earliest.day,
         hour=target_time.hour, minute=target_time.minute, second=target_time.second,
@@ -526,13 +566,13 @@ def compute_group_analysis(
 
     on_time = parse_time_str(cfg.get('LIGHTS_ON_TIME', f"{cfg.get('LIGHTS_ON_HOUR', 7):02d}:00"))
     off_time = parse_time_str(cfg.get('LIGHTS_OFF_TIME', f"{cfg.get('LIGHTS_OFF_HOUR', 19):02d}:00"))
-    on_sec = on_time.hour * 3600 + on_time.minute * 60
-    off_sec = off_time.hour * 3600 + off_time.minute * 60
-    start_sec = parse_time_str(start_time).hour * 3600 + parse_time_str(start_time).minute * 60
+    on_sec = on_time.hour * 3600 + on_time.minute * 60 if on_time else 7 * 3600
+    off_sec = off_time.hour * 3600 + off_time.minute * 60 if off_time else 19 * 3600
 
     # Load and align each mouse
     raw_data = {}
     grids = {}
+    ref_start_ts = None
     for group_name, file_list in groups.items():
         if not file_list:
             continue
@@ -542,7 +582,13 @@ def compute_group_analysis(
             if not path.is_absolute():
                 path = root / path
             df = load_mouse_csv(path, cfg)
-            sec, temp, start_ts = align_mouse_data(df, start_time, window_hours, timezone_name)
+            allow_phase_folding = cfg.get('ALLOW_PHASE_FOLDING', None)
+            sec, temp, start_ts = align_mouse_data(
+                df, start_time, window_hours, timezone_name,
+                allow_phase_folding=allow_phase_folding,
+            )
+            if ref_start_ts is None:
+                ref_start_ts = start_ts
             grid = one_second_grid(sec, temp, duration=duration_s)
             mouse_id = str(df['mouse_id'].iloc[0])
             grids[mouse_id] = grid
@@ -555,6 +601,14 @@ def compute_group_analysis(
 
     if not grids:
         raise ValueError('No valid mouse data found to analyze.')
+
+    if ref_start_ts is not None:
+        start_sec = ref_start_ts.hour * 3600 + ref_start_ts.minute * 60 + ref_start_ts.second
+    elif start_time is not None and parse_time_str(start_time) is not None:
+        t_parsed = parse_time_str(start_time)
+        start_sec = t_parsed.hour * 3600 + t_parsed.minute * 60 + t_parsed.second
+    else:
+        start_sec = 7 * 3600
 
     # Compute common support mask if requested
     mask = None
@@ -625,6 +679,7 @@ def compute_group_analysis(
         paired=pd.DataFrame(paired_rows).set_index(['genotype', 'animal']),
         window_hours=window_hours,
         start_sec=start_sec,
+        start_ts=ref_start_ts,
         on_sec=on_sec,
         off_sec=off_sec,
         mask=mask,
@@ -664,14 +719,20 @@ def draw_group_figure(analysis_results: dict) -> plt.Figure:
     })
 
     fig_w = max(10.65, 10.65 * (window_hours / 24.0) ** 0.3)
-    fig_h = 3.9
+    fig_h = 4.2
     fig = plt.figure(figsize=(fig_w, fig_h))
 
-    # Panel geometry
-    ax_contrast = fig.add_axes([0.94 / fig_w, 0.66 / fig_h, 2.35 / fig_w, 2.24 / fig_h])
-    prof_w = fig_w - 5.85
-    ax_profile = fig.add_axes([3.70 / fig_w, 0.66 / fig_h, prof_w / fig_w, 2.24 / fig_h])
-    ax_summary = fig.add_axes([(fig_w - 2.85) / fig_w, 0.66 / fig_h, 2.35 / fig_w, 2.24 / fig_h])
+    # Panel geometry: well-spaced non-overlapping 3 panels
+    p1_w = 2.25
+    p3_w = 2.25
+    p1_left = 0.94
+    p2_left = 3.90
+    p3_left = fig_w - 2.85
+    prof_w = max(4.0, (p3_left - 0.75) - p2_left)
+
+    ax_contrast = fig.add_axes([p1_left / fig_w, 0.78 / fig_h, p1_w / fig_w, 2.24 / fig_h])
+    ax_profile = fig.add_axes([p2_left / fig_w, 0.78 / fig_h, prof_w / fig_w, 2.24 / fig_h])
+    ax_summary = fig.add_axes([p3_left / fig_w, 0.78 / fig_h, p3_w / fig_w, 2.24 / fig_h])
 
     for ax in (ax_contrast, ax_profile, ax_summary):
         ax.spines[['top', 'right']].set_visible(False)
@@ -745,8 +806,9 @@ def draw_group_figure(analysis_results: dict) -> plt.Figure:
             ax_profile.axvline(b_s, color=DIVIDER, linewidth=0.8)
         mid = (b_s + b_e) / 2.0
         label_text = 'LIGHT' if is_l else 'DARK'
-        ax_profile.text(mid / window_hours, 1.025, label_text, transform=ax_profile.transAxes,
-                        ha='center', va='bottom', fontsize=9, color=INK, weight='bold')
+        if (b_e - b_s) >= 1.0:
+            ax_profile.text(mid / window_hours, 1.025, label_text, transform=ax_profile.transAxes,
+                            ha='center', va='bottom', fontsize=9, color=INK, weight='bold')
 
     # Traces and group lines
     all_trace_min, all_trace_max = -0.5, 0.5
@@ -761,23 +823,47 @@ def draw_group_figure(analysis_results: dict) -> plt.Figure:
 
         if piv.shape[1] > 1:
             sd_s = piv.std(axis=1, ddof=1)
-            ax_profile.fill_between(piv.index, mean_s - sd_s, mean_s + sd_s, color=color, alpha=0.14, linewidth=0)
+            valid_mask = np.isfinite(mean_s) & np.isfinite(sd_s)
+            if valid_mask.any():
+                ax_profile.fill_between(
+                    piv.index, mean_s - sd_s, mean_s + sd_s,
+                    where=valid_mask, color=color, alpha=0.14, linewidth=0
+                )
             for animal in piv.columns:
                 ax_profile.plot(piv.index, piv[animal], color=color, linewidth=0.65, alpha=0.25)
         ax_profile.plot(piv.index, mean_s, color=color, linewidth=1.9, linestyle=style, zorder=4)
 
-        all_trace_min = min(all_trace_min, float(piv.min().min()))
-        all_trace_max = max(all_trace_max, float(piv.max().max()))
+        valid_min = piv.min().min()
+        valid_max = piv.max().max()
+        if pd.notna(valid_min):
+            all_trace_min = min(all_trace_min, float(valid_min))
+        if pd.notna(valid_max):
+            all_trace_max = max(all_trace_max, float(valid_max))
 
     y_low = np.floor(min(all_trace_min, -1.0) * 2) / 2
     y_high = np.ceil(max(all_trace_max, 1.0) * 2) / 2
     ax_profile.set_ylim(y_low, y_high)
     ax_profile.set_yticks(np.arange(y_low, y_high + 0.1, 0.5 if (y_high - y_low) <= 4 else 1.0))
     ax_profile.set_ylabel('Δ temperature (°C)', color=INK)
-    ax_profile.set_xlabel('Time (h)', color=INK, labelpad=7)
 
-    tick_step = 6 if window_hours <= 24 else 12
-    ax_profile.set_xticks(np.arange(0, window_hours + 0.1, tick_step))
+    start_ts = analysis_results.get('start_ts')
+    tick_step = 6 if window_hours <= 48 else 12
+    ticks = np.arange(0, window_hours + 0.1, tick_step)
+    labels = []
+    for h in ticks:
+        h_int = int(round(h))
+        if start_ts is not None:
+            t = start_ts + pd.Timedelta(seconds=h * 3600)
+            time_str = t.strftime('%H:%M')
+            if h_int % 24 == 0:
+                labels.append(f"{h_int}\n{time_str}\n{t.strftime('%d-%b')}")
+            else:
+                labels.append(f"{h_int}\n{time_str}")
+        else:
+            labels.append(f"{h_int}")
+    ax_profile.set_xticks(ticks)
+    ax_profile.set_xticklabels(labels, linespacing=0.92)
+    ax_profile.set_xlabel('Time (h) / Real time', color=INK, labelpad=7)
 
     # ------------------ PANEL 3: Temperature Decrease ------------------
     ax_summary.set_title('Temperature decrease\nduring light', pad=15, weight='bold', color=INK)
